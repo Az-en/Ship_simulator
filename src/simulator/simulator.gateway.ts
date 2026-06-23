@@ -12,16 +12,15 @@ export class SimulatorGateway {
   server: Server;
 
   constructor(private readonly simulatorService: SimulatorService) {
-    this.simulatorService.stateUpdate.subscribe((currentCount) => {
-      this.server.emit('tickUpdate', { count: currentCount });
+    this.simulatorService.fleetUpdate$.subscribe((fleetSnapshot) => {
+      // This shoots the raw json snapshot array down to everyone watching the dashboard
+      this.server.emit('fleetUpdate', fleetSnapshot);
     });
-  } // <-- The constructor MUST close here
+  }
 
-  // This is a separate method on the class now
   @SubscribeMessage('startSimulator')
-  handleStartSim(client: any, payload: { target: number }) {
-    // Fixed typo: changed simulationService -> simulatorService
-    this.simulatorService.start(payload.target || 100);
+  handleStartSim() {
+    this.simulatorService.startSimulation();
     return { status: 'Started' };
   }
 }

@@ -1,39 +1,70 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { Ship, ShipConfig } from './ship/ship.model';
 import { Subject } from 'rxjs';
+import { clc } from '@nestjs/common/utils/cli-colors.util';
 @Injectable()
-export class SimulatorService {
+export class SimulatorService implements OnModuleInit {
   private readonly logger = new Logger(SimulatorService.name);
-
-  private count = 0;
-  private target = 0;
+  private ships: Ship[] = [];
   private intervalId: NodeJS.Timeout | null = null;
+  public fleetUpdate$ = new Subject<any[]>();
 
-  public stateUpdate = new Subject<number>();
+  async onModuleInit() {
+    await this.loadShipsFromJson();
+  }
 
-  start(targetNumber: number) {
-    this.target = targetNumber;
-    this.count = 0;
-    this.logger.log(`Starting simulator with target ${this.target}`);
+  async loadShipsFromJson() {
+    try {
+      const filePath = path.resolve(process.cwd(), 'docs/fleet.json');
+      const rawData = await fs.readFile(filePath, 'utf-8'); // the raw is in string form
+
+      const parsedData = JSON.parse(rawData) as object;
+      const shipConfigs = parsedData['fleet'] as ShipConfig[];
+      this.ships = shipConfigs.map((ship) => new Ship(ship));
+      this.logger.log(
+        clc.cyanBright(
+          `Successfully loaded ${this.ships.length} ships from JSON config.`,
+        ),
+      );
+    } catch (err) {
+      if (err instanceof Error) {
+        this.logger.error(`Failed to initialize data`, err.stack);
+      } else {
+        this.logger.error(`Failed to initialize data due to an unknown error`);
+      }
+    }
+  }
+
+  startSimulation() {
+    if (this.intervalId) clearInterval(this.intervalId);
+
+    this.logger.log('Starting Command Center Simulator Core Loop (1 Hz)...');
 
     this.intervalId = setInterval(() => {
       this.tick();
-    }, 1000);
+    }, 1000); // 1 Hz rate
   }
 
   private tick() {
-    if (this.count < this.target) {
-      this.count++;
-      // Announce the new state
-      this.stateUpdate.next(this.count);
-    } else {
-      this.stop();
-    }
+    // update positions for all elements in memory
+    this.ships.forEach((ship) => {
+      ship.updatePosition();
+    });
+
+    //  Build the current raw snapshot data structure array
+    const currentSnapshot = this.ships.map((ship) => ship.getData());
+
+    //  send it into pipeline
+    this.fleetUpdate$.next(currentSnapshot);
   }
-  stop() {
+
+  stopSimulation() {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
-    this.logger.log(`Simulation reached target (${this.target}) and stopped.`);
+    this.logger.log('Simulation stopped.');
   }
 }
