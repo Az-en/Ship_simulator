@@ -17,7 +17,7 @@ export class SimulatorService implements OnModuleInit {
 
   async loadShipsFromJson() {
     try {
-      const filePath = path.resolve(process.cwd(), 'docs/fleet.json');
+      const filePath = path.resolve(process.cwd(), 'data/fleet.json');
       const rawData = await fs.readFile(filePath, 'utf-8'); // the raw is in string form
 
       const parsedData = JSON.parse(rawData) as object;
