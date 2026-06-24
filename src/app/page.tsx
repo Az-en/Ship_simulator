@@ -1,9 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { Card, CardTitle, CardDescription } from "@/components/ui/card";
-
+import { useRoleStore } from "@/stores/role";
 export default function Home() {
+  // extract the functionality into an object
+
+  const role = useRoleStore((state) => state.role);
+  const setCommand = useRoleStore((state) => state.setCommand);
+  const setCaptain = useRoleStore((state) => state.setCaptain);
   return (
     <div className="min-h-screen w-full bg-gray-900 flex flex-col items-center justify-center gap-y-6">
       <div className="text-center">
@@ -18,6 +22,7 @@ export default function Home() {
         <Link
           href="/fleet"
           className="flex-1 max-w-xs bg-blue-900 hover:bg-blue-800 transition-colors duration-200 text-center py-10 border border-blue-800 rounded-lg text-white font-bold cursor-pointer shadow-lg hover:shadow-blue-900/50"
+          onClick={() => setCommand()}
         >
           Command Center
         </Link>
@@ -25,6 +30,7 @@ export default function Home() {
         <Link
           href="/fleet"
           className="flex-1 max-w-xs bg-orange-600 hover:bg-orange-500 transition-colors duration-200 text-center py-10 border border-orange-500 rounded-lg text-white font-bold cursor-pointer shadow-lg hover:shadow-orange-600/50"
+          onClick={() => setCaptain()}
         >
           Captain
         </Link>
