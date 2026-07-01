@@ -5,9 +5,7 @@ export interface boundingBox {
   west: string;
 }
 
-export interface navigableWater {
-  data: [[number, number]];
-}
+export type navigableWater = [number, number][];
 
 export interface Port {
   id: string;

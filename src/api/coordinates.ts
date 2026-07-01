@@ -8,5 +8,5 @@ export const getNavigableWater = (
   url: string = "/coordinates/navigableWater",
 ) => getRequest<navigableWater>(url);
 
-export const getPorts = (url: string = "/coordinates/Port") =>
+export const getPorts = (url: string = "/coordinates/ports") =>
   getRequest<Port[]>(url);
