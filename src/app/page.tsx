@@ -2,10 +2,8 @@
 
 import Link from "next/link";
 import { useRoleStore } from "@/stores/role";
-export default function Home() {
-  // extract the functionality into an object
 
-  const role = useRoleStore((state) => state.role);
+export default function Home() {
   const setCommand = useRoleStore((state) => state.setCommand);
   const setCaptain = useRoleStore((state) => state.setCaptain);
   return (

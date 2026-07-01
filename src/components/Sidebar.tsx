@@ -8,21 +8,17 @@ import { FleetPanel } from "@/components/fleet-panel";
 import { SHIPS } from "@/lib/fleet-data";
 
 export default function Sidebar() {
-  // Manage which ship is actively selected
   const [selectedShipId, setSelectedShipId] = useState<string | null>(null);
 
-  // Optional: Find the actual ship object based on the ID to update other panels
   const selectedShip = SHIPS.find((s) => s.id === selectedShipId);
 
   return (
-    <aside className="w-[420px] h-full bg-gray-900/40 border-l border-gray-800 flex flex-col overflow-y-auto px-4 py-4 gap-y-4 shrink-0">
-      {/* SECTION 1: Selected Vessel */}
+    <aside className="w-105 h-full bg-gray-900/40 border-l border-gray-800 flex flex-col overflow-y-auto px-4 py-4 gap-y-4 shrink-0">
       <div className="bg-gray-950/60 border border-gray-800/80 rounded-xl p-4">
         <h3 className="text-xs font-bold tracking-widest text-gray-400 uppercase mb-3 flex items-center gap-2">
           <Crosshair className="h-3 w-3 text-emerald-500" /> Selected Vessel
         </h3>
 
-        {/* Dynamically show data if a ship is selected */}
         {selectedShip ? (
           <div className="border border-gray-800 rounded-lg py-6 px-4 text-center">
             <div className="text-lg font-bold text-white mb-1">
@@ -72,7 +68,7 @@ export default function Sidebar() {
       </div>
 
       {/* SECTION 3: Fleet Overview (Modular Component Integration) */}
-      <div className="bg-gray-950/60 border border-gray-800/80 rounded-xl p-4 flex-1 flex flex-col min-h-[300px]">
+      <div className="bg-gray-950/60 border border-gray-800/80 rounded-xl p-4 flex-1 flex flex-col min-h-75">
         <div className="flex justify-between items-center mb-3">
           <h3 className="text-xs font-bold tracking-widest text-gray-400 uppercase flex items-center gap-2">
             <MapPin className="h-3 w-3 text-gray-400" /> Fleet Overview

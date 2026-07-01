@@ -1,8 +1,11 @@
 "use client";
 import { useState } from "react";
 import { Anchor, Radio } from "lucide-react";
-
+import { useFleetStore } from "@/stores/fleetStore";
+import { Button } from "@/components/ui/button";
 export default function TopBar() {
+  const isConnected = useFleetStore((state) => state.isConnected);
+  const startSimulator = useFleetStore((state) => state.startSimulator);
   const [role, setRole] = useState("command");
   return (
     <div className="h-16 w-full flex items-center justify-between bg-gray-950 border-b border-gray-800 px-6">
@@ -15,6 +18,13 @@ export default function TopBar() {
       </div>
 
       <div className="flex items-center gap-6">
+        <button
+          onClick={startSimulator}
+          className="px-4 py-1.5 bg-gray-900/50 border border-gray-800 rounded-xl p-1 text-sm font-medium"
+        >
+          Start Simulator
+        </button>
+
         <div className="flex items-center bg-gray-900/50 border border-gray-800 rounded-xl p-1 text-sm font-medium">
           <button
             onClick={() => setRole("command")}
@@ -41,11 +51,19 @@ export default function TopBar() {
 
         {/* 2. Link Status Badge */}
         <div className="flex items-center gap-2 bg-gray-900/50 border border-gray-800 rounded-xl px-4 py-2 text-sm font-semibold text-white">
-          <Radio className="h-4 w-4 text-emerald-500 animate-pulse" />
-          <span>Link Secure</span>
+          <Radio
+            className={`h-4 w-4 ${isConnected ? "text-emerald-500 animate-pulse" : "text-rose-500"}`}
+          />
+          <span className={!isConnected ? "text-rose-400" : ""}>
+            {isConnected ? "Link Secure" : "Link Not Working"}
+          </span>
           <span className="relative flex h-2 w-2 ml-1">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            {isConnected && (
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            )}
+            <span
+              className={`relative inline-flex rounded-full h-2 w-2 ${isConnected ? "bg-emerald-500" : "bg-rose-500"}`}
+            />
           </span>
         </div>
 

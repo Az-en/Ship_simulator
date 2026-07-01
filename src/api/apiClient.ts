@@ -18,6 +18,7 @@ apiClient.interceptors.response.use(
   },
 );
 
+// a template function because if we try to write multiple get functions for each get Api it is just straight up redundant, DRY
 export const getRequest = async <T>(url: string): Promise<T> => {
   const response = await apiClient.get<T>(url);
   return response.data;

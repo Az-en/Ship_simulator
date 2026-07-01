@@ -1,6 +1,5 @@
 "use client";
 import dynamic from "next/dynamic";
-
 // 1. Dynamically import the map and turn off SSR
 const MapCanvas = dynamic(() => import("@/components/mapCanvas"), {
   ssr: false,
@@ -10,6 +9,10 @@ const MapCanvas = dynamic(() => import("@/components/mapCanvas"), {
     </div>
   ),
 });
-export default function fleet() {
-  return <MapCanvas></MapCanvas>;
+export default function Fleet() {
+  return (
+    <div className="h-full w-full">
+      <MapCanvas></MapCanvas>
+    </div>
+  );
 }
