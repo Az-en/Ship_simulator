@@ -1,21 +1,24 @@
 "use client";
 
 import React, { useEffect } from "react";
+import L from "leaflet";
 import {
   MapContainer,
   TileLayer,
   useMap,
-  Rectangle,
   Polygon,
   CircleMarker,
   Tooltip,
+  Marker,
+  Polyline,
 } from "react-leaflet";
 import { useCoordinatesStore } from "@/stores/coordinatesStore";
+import { useFleetStore } from "@/stores/fleetStore"; // Import your fleet store
+
 function MapFix() {
   const map = useMap();
 
   useEffect(() => {
-    // A tiny delay ensures Tailwind has finished expanding the layout
     const timer = setTimeout(() => {
       map.invalidateSize();
     }, 100);
@@ -25,13 +28,35 @@ function MapFix() {
   return null;
 }
 
+// A simple fallback icon for your ships (a yellow circle with a border)
+const createShipIcon = (isSelected: boolean) =>
+  L.divIcon({
+    className: "clear-background",
+    html: `
+      <div style="
+        width: 16px; 
+        height: 16px; 
+        background-color: ${isSelected ? "#eab308" : "#f8fafc"}; /* Yellow if selected, white if not */
+        border: 3px solid ${isSelected ? "#ca8a04" : "#64748b"}; 
+        border-radius: 50%;
+        box-shadow: 0 0 4px rgba(0,0,0,0.5);
+      "></div>
+    `,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  });
+
 export default function MapCanvas() {
+  // Navigation Environment State
   const bb = useCoordinatesStore((state) => state.bb);
   const nWater = useCoordinatesStore((state) => state.navigableWater);
   const ports = useCoordinatesStore((state) => state.ports);
 
-  // Safely calculate Bounding Box bounds (ensure data exists before parsing)
-  // Leaflet bounds format: [[south, west], [north, east]]
+  // Fleet State
+  const ships = useFleetStore((state) => state.fleetUpdates);
+  const selectedShipId = useFleetStore((state) => state.selectedShipId);
+  const setSelectedShipId = useFleetStore((state) => state.setSelectedShipId);
+
   const hasBoundingBox = bb && bb.north !== "";
   const bounds: [[number, number], [number, number]] | undefined =
     hasBoundingBox
@@ -40,6 +65,7 @@ export default function MapCanvas() {
           [parseFloat(bb.north), parseFloat(bb.east)],
         ]
       : undefined;
+
   return (
     <div className="h-full w-full">
       <MapContainer
@@ -55,23 +81,9 @@ export default function MapCanvas() {
         />
         <MapFix />
 
-        {/* 2. Draw Bounding Box (Red dashed outline) */}
-        {/* {bounds && (
-          <Rectangle
-            bounds={bounds}
-            pathOptions={{
-              color: "#ef4444",
-              weight: 2,
-              dashArray: "5, 10",
-              fillOpacity: 0,
-            }}
-          />
-        )} */}
-
-        {/* 3. Draw Navigable Water Polygon (Translucent Blue) */}
+        {/* --- Map Environment Data (Water & Ports) --- */}
         {nWater && nWater.length > 0 && (
           <>
-            {/* A. The Translucent Blue Polygon */}
             <Polygon
               positions={nWater}
               pathOptions={{
@@ -81,33 +93,28 @@ export default function MapCanvas() {
                 weight: 1,
               }}
             />
-
-            {/* B. The Individual Polygon Points */}
-            {nWater.map((point, index) => (
+            {/* {nWater.map((point, index) => (
               <CircleMarker
-                // Using index is usually frowned upon, but for static map shapes it's perfectly fine.
-                // Alternatively, use `${point[0]}-${point[1]}` as the key.
                 key={`water-pt-${index}`}
                 center={point as [number, number]}
-                radius={3} // Keep these smaller than your ports so the map doesn't look cluttered
+                radius={3}
                 pathOptions={{
-                  color: "#60a5fa", // A slightly lighter blue for the dots
+                  color: "#60a5fa",
                   fillColor: "#60a5fa",
                   fillOpacity: 1,
                   weight: 1,
                 }}
               >
-                {/* Optional: A tiny tooltip to see the exact coordinates if you hover */}
                 <Tooltip direction="top" offset={[0, -5]} opacity={0.8}>
                   <span className="text-xs font-mono text-gray-800">
                     {point[0]}, {point[1]}
                   </span>
                 </Tooltip>
               </CircleMarker>
-            ))}
+            ))} */}
           </>
         )}
-        {/* 4. Draw Ports (Solid Emerald Dots with Tooltips) */}
+
         {ports?.map((port) => (
           <CircleMarker
             key={port.id}
@@ -120,13 +127,46 @@ export default function MapCanvas() {
               weight: 2,
             }}
           >
-            {/* Tooltip shows up when you hover over the port */}
             <Tooltip direction="top" offset={[0, -10]} opacity={1}>
               <span className="font-bold">{port.name}</span>
-              <span className="font-bold">{port.position}</span>
             </Tooltip>
           </CircleMarker>
         ))}
+
+        {/* --- Fleet Rendering --- */}
+        {ships.map((ship) => {
+          const isSelected = ship.shipId === selectedShipId;
+
+          return (
+            <React.Fragment key={ship.shipId}>
+              {/* 1. The Ship Marker */}
+              <Marker
+                position={ship.position}
+                icon={createShipIcon(isSelected)}
+                eventHandlers={{
+                  click: () => setSelectedShipId(ship.shipId), // Update global selection on click
+                }}
+              >
+                <Tooltip direction="top" offset={[0, -10]}>
+                  <div className="font-bold">{ship.name}</div>
+                  <div className="text-xs text-slate-500">{ship.speed} kn</div>
+                </Tooltip>
+              </Marker>
+
+              {/* 2. The Animated Path (Only shown if this ship is selected AND has a path) */}
+              {isSelected && ship.path && ship.path.length > 0 && (
+                <Polyline
+                  positions={ship.path}
+                  pathOptions={{
+                    color: "#06b6d4", // Cyan color for the path
+                    weight: 3,
+                    className: "animated-ship-path", // Triggers the CSS animation
+                  }}
+                />
+              )}
+            </React.Fragment>
+          );
+        })}
       </MapContainer>
     </div>
   );

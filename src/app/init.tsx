@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { useFleetStore } from "@/stores/fleetStore";
 import { useCoordinatesStore } from "@/stores/coordinatesStore";
 import { getBB, getNavigableWater, getPorts } from "@/api/coordinates";
-import { toast, Toaster } from "sonner";
+import { toast } from "sonner";
 export default function AppInitializer() {
   const initSocket = useFleetStore((state) => state.initSocket);
   const setBoundingBox = useCoordinatesStore((state) => state.setBoundingBox);

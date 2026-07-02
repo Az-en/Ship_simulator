@@ -128,3 +128,14 @@
     @apply font-sans;
   }
 }
+
+.animated-ship-path {
+  stroke-dasharray: 10 15; /* 10px dash, 15px gap */
+  animation: flowLine 20s linear infinite;
+}
+
+@keyframes flowLine {
+  to {
+    stroke-dashoffset: -1000; /* Negative value makes it flow towards destination */
+  }
+}
