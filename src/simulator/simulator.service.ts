@@ -6,6 +6,13 @@ import { Subject } from 'rxjs';
 import { clc } from '@nestjs/common/utils/cli-colors.util';
 import { ShipRoutingService } from 'src/ship-routing/ship-routing.service';
 import { PortsService } from 'src/ports/ports.service';
+import { createNavigableGrid } from 'src/utils/convertPolygonToGrid';
+import { Status } from 'src/simulator/ship/ship.model';
+import { createSafetyBuffer } from 'src/utils/geoMath';
+import { Postition } from './ship/ship.model';
+interface RestrictidAreaType {
+  coordinates: Postition[] | Postition[][];
+}
 
 @Injectable()
 export class SimulatorService implements OnModuleInit {
@@ -62,10 +69,14 @@ export class SimulatorService implements OnModuleInit {
         const endCoords = this.portService.getPortCoordinates(
           ship.getDestination(),
         );
+
         const currentPos = ship.getPosition();
+
+        // Ensure currentPos values are treated as numbers
         const startCoords: [number, number] = [currentPos.lat, currentPos.long];
 
         const path = this.routingService.calculatePath(startCoords, endCoords);
+
         ship.setPath(path);
       });
 
@@ -103,11 +114,90 @@ export class SimulatorService implements OnModuleInit {
   }
 
   stopSimulation() {
-    // FIX: Clear the timeoutId, not intervalId
     if (this.timeoutId) {
       clearTimeout(this.timeoutId);
       this.timeoutId = null;
     }
+
     this.logger.log('Simulation stopped.');
+  }
+
+  async handleNewArea(data: RestrictidAreaType) {
+    try {
+      // 1. Calculate the new NavigableArea
+      // FIX: Explicitly cast to Postition[] so TS stops worrying about the 2D array
+      const rawCoords = (
+        Array.isArray(data.coordinates[0])
+          ? data.coordinates[0]
+          : data.coordinates
+      ) as Postition[];
+
+      // Inflate the drawn polygon by 200 meters!
+      // Every function after this will use the inflated boundary, giving the ship a safe berth.
+      const bufferedPolygonArray = createSafetyBuffer(rawCoords, 0.2);
+
+      // Convert it back into the format the rest of your app expects
+      // FIX: Added 'long: c[1]' to satisfy the strict Postition interface requirement
+      const safeData: RestrictidAreaType = {
+        coordinates: bufferedPolygonArray.map((c) => ({
+          lat: c[0],
+          lng: c[1],
+          long: c[1],
+        })),
+      };
+
+      await createNavigableGrid(safeData.coordinates as Postition[]);
+      await this.routingService.loadNavGraph();
+
+      // 2. check if any ship Path goes through that area
+      const invalidShips: Ship[] = []; // to store all ships with invalid paths
+
+      for (const ship of this.ships) {
+        // FIX: Cast data 'as any' to bypass the local vs imported RestrictidAreaType naming collision
+        const isPathValid = this.routingService.checkIfPathIsValid(
+          ship,
+          data as any,
+        );
+
+        console.log(`Ship ${ship.getId()} path valid:`, isPathValid);
+
+        if (!isPathValid) {
+          ship.setStatus(Status.REROUTING);
+          invalidShips.push(ship);
+        }
+      }
+
+      this.recalculatePathsInBackground(invalidShips).catch((err) => {
+        if (err instanceof Error) {
+          this.logger.error('Background routing failed', err.stack);
+        }
+      });
+    } catch (e) {
+      if (e instanceof Error) this.logger.error(e.message, e.stack);
+    }
+  }
+
+  /**
+   * Runs completely in the background, updating ships one by one
+   * without blocking the main event loop.
+   */
+  private async recalculatePathsInBackground(ships: Ship[]) {
+    for (const ship of ships) {
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const parsed: [number, number] = [
+        ship.getPosition().lat,
+        ship.getPosition().long,
+      ];
+
+      // Perform the heavy pathfinding math
+      const newPath = this.routingService.calculatePath(
+        parsed,
+        this.portService.getPortCoordinates(ship.getDestination()),
+      );
+
+      ship.setPath(newPath);
+      ship.setStatus(Status.NORMAL);
+    }
   }
 }

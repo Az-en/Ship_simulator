@@ -9,8 +9,6 @@ import { SimulatorService } from './simulator.service';
 import { Logger } from '@nestjs/common';
 import type { Postition } from './ship/ship.model';
 import { ShipRoutingService } from 'src/ship-routing/ship-routing.service';
-import { createNavigableGrid } from 'src/utils/convertPolygonToGrid';
-
 interface RestrictidAreaType {
   coordinates: Postition[];
 }
@@ -37,10 +35,8 @@ export class SimulatorGateway {
   }
   @SubscribeMessage('NewRestrictidArea')
   async handleNewArea(@MessageBody() data: RestrictidAreaType) {
-    await this.shipRoutingService.loadNavGraph();
-    const coordinates: Postition[] = data.coordinates;
-    await createNavigableGrid(coordinates);
-    this.shipRoutingService.console.log('New restrictid area received');
-    console.log(JSON.stringify(data, null, 2));
+    if (!data || !data.coordinates) return { error: 'No Polygon was sent' };
+    console.log(data.coordinates);
+    await this.simulatorService.handleNewArea(data);
   }
 }

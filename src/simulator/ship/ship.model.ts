@@ -1,4 +1,4 @@
-enum Status {
+export enum Status {
   NORMAL = 'normal',
   REROUTING = 'REROUTING',
   DISTRESSED = 'DISTRESSED',
@@ -9,6 +9,7 @@ enum Status {
 export interface Postition {
   lat: number;
   long: number;
+  lng?: number;
 }
 
 export interface ShipConfig {
@@ -78,9 +79,18 @@ export class Ship {
       path: this.#path,
     };
   }
+  getId() {
+    return this.#shipId;
+  }
   setPath(path: [number, number][]) {
     this.#path = path;
     this.#hasPathChanged = true;
+  }
+  getStatus() {
+    return this.#status;
+  }
+  setStatus(status: Status) {
+    this.#status = status;
   }
 
   getDestination() {

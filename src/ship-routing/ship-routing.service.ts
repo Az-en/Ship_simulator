@@ -1,7 +1,9 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-
+import { Ship } from 'src/simulator/ship/ship.model';
+import { Postition } from 'src/simulator/ship/ship.model';
+import { isPointInWater } from 'src/utils/convertPolygonToGrid';
 // Define the shape of the graph we generated earlier
 export interface GridNode {
   lat: number;
@@ -9,6 +11,9 @@ export interface GridNode {
   neighbors: string[];
 }
 
+interface RestrictidAreaType {
+  coordinates: Postition[];
+}
 @Injectable()
 export class ShipRoutingService implements OnModuleInit {
   private readonly logger = new Logger(ShipRoutingService.name);
@@ -22,7 +27,7 @@ export class ShipRoutingService implements OnModuleInit {
   // Load the graph from the JSON file you just generated
   public async loadNavGraph() {
     try {
-      const graphPath = path.resolve(process.cwd(), 'data/new-graph.json');
+      const graphPath = path.resolve(process.cwd(), 'data/nav-graph.json');
       const rawData = await fs.readFile(graphPath, 'utf-8');
       this.navGraph = JSON.parse(rawData) as Record<string, GridNode>;
 
@@ -159,7 +164,36 @@ export class ShipRoutingService implements OnModuleInit {
       // Unshift adds it to the beginning of the array so it reads from Start -> Finish
       path.unshift([node.lat, node.lng]);
     }
-
     return path;
+  }
+
+  // Check if a ship paths goes through a restrictid area
+  public checkIfPathIsValid(ship: Ship, polygon: RestrictidAreaType): boolean {
+    if (!ship || !polygon || !polygon.coordinates) {
+      return true;
+    }
+
+    const shipPath = ship.getPath()?.path as [number, number][];
+    if (!shipPath || shipPath.length === 0) {
+      return true;
+    }
+
+    // FIX 1: Extract the inner array (the outer ring of the polygon)
+    // We use a safety check just in case it ever comes through as a flat array
+    const rawCoords = Array.isArray(polygon.coordinates[0])
+      ? polygon.coordinates[0]
+      : polygon.coordinates;
+
+    // FIX 2: Map using .lng instead of .long!
+    // Note: you may need to cast (coor: any) if your interface says 'long'
+    const parsedPolygon = rawCoords.map((coor: any) => [coor.lat, coor.lng]);
+
+    for (const [lat, lng] of shipPath) {
+      const doesPassThroughArea = isPointInWater([lat, lng], parsedPolygon);
+      if (doesPassThroughArea) {
+        return false;
+      }
+    }
+    return true;
   }
 }
