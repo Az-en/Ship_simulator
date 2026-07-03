@@ -1,10 +1,20 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-
+import type { Postition } from 'src/simulator/ship/ship.model';
 // Graph Resolution: 0.1 degrees is roughly 11km spacing.
 // (You can lower this to 0.05 for a tighter, more accurate grid, but the file size will grow!)
 const RESOLUTION = 0.1;
-
+const neighborOffsets = [
+  [0, RESOLUTION], // Right
+  [0, -RESOLUTION], // Left
+  [RESOLUTION, 0], // Up
+  [-RESOLUTION, 0], // Down
+  // Diagonals
+  [RESOLUTION, RESOLUTION], // Top-Right
+  [RESOLUTION, -RESOLUTION], // Top-Left
+  [-RESOLUTION, RESOLUTION], // Bottom-Right
+  [-RESOLUTION, -RESOLUTION], // Bottom-Left
+];
 interface GridNode {
   lat: number;
   lng: number;
@@ -51,7 +61,7 @@ async function generateGrid() {
 
     // Resolve the path to your JSON data file
     const fleetPath = path.resolve(process.cwd(), 'data/fleet.json');
-    console.log(fleetPath);
+    // console.log(fleetPath);
     const rawData = await fs.readFile(fleetPath, 'utf-8');
 
     // Explicitly cast the parsed JSON to our new interface
@@ -87,17 +97,6 @@ async function generateGrid() {
     );
 
     // Step B: Calculate neighbors for every safe node
-    const neighborOffsets = [
-      [0, RESOLUTION], // Right
-      [0, -RESOLUTION], // Left
-      [RESOLUTION, 0], // Up
-      [-RESOLUTION, 0], // Down
-      // Diagonals
-      [RESOLUTION, RESOLUTION], // Top-Right
-      [RESOLUTION, -RESOLUTION], // Top-Left
-      [-RESOLUTION, RESOLUTION], // Bottom-Right
-      [-RESOLUTION, -RESOLUTION], // Bottom-Left
-    ];
 
     // Build the graph dictionary
     validPoints.forEach(([lat, lng]) => {
@@ -129,5 +128,55 @@ async function generateGrid() {
   }
 }
 
-// Execute the async function and handle any top-level errors
-generateGrid().catch(console.error);
+export async function createNavigableGrid(polygon: Postition[]) {
+  const fleetPath = path.resolve(process.cwd(), 'data/fleet.json');
+  const rawData = await fs.readFile(fleetPath, 'utf-8');
+
+  const scenarioData = JSON.parse(rawData) as ScenarioData;
+  const navigableWater = scenarioData.navigableWater;
+
+  // parse polygon coordinates for ray casting
+  const parsedPolygon = polygon.map((coor) => {
+    return [coor.lat, coor.long];
+  });
+  const validPoints: [number, number][] = [];
+  const grid: Record<string, GridNode> = {};
+  const boundingBox = scenarioData.boundingBox;
+  // loop to get all points that are navigable
+  for (
+    let lat = boundingBox.south;
+    lat <= boundingBox.north;
+    lat += RESOLUTION
+  ) {
+    for (
+      let long = boundingBox.west;
+      long <= boundingBox.east;
+      long += RESOLUTION
+    ) {
+      const isInWater = isPointInWater([lat, long], navigableWater);
+      const isInRestrictidArea = isPointInWater([lat, long], parsedPolygon);
+
+      if (isInWater && !isInRestrictidArea) validPoints.push([lat, long]);
+    }
+  }
+
+  validPoints.forEach(([lat, long]) => {
+    const key = coordsToKey(lat, long);
+    const neighbors: string[] = [];
+
+    neighborOffsets.forEach(([offsetlat, offsetlong]) => {
+      const nLat = lat + offsetlat;
+      const nLong = long + offsetlong;
+
+      if (
+        isPointInWater([nLat, nLong], navigableWater) &&
+        !isPointInWater([nLat, nLong], parsedPolygon)
+      ) {
+        neighbors.push(coordsToKey(nLat, nLong));
+      }
+    });
+    grid[key] = { lat, lng: long, neighbors: neighbors };
+  });
+  const outputPath = path.resolve(process.cwd(), 'data/new-graph.json');
+  await fs.writeFile(outputPath, JSON.stringify(grid, null, 2));
+}
