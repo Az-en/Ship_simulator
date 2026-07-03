@@ -1,15 +1,28 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import { readFile } from 'fs/promises';
+import { join } from 'path';
 import { Ship, ShipConfig } from './ship/ship.model';
 import { Subject } from 'rxjs';
 import { clc } from '@nestjs/common/utils/cli-colors.util';
+import { ShipRoutingService } from 'src/ship-routing/ship-routing.service';
+import { PortsService } from 'src/ports/ports.service';
+
 @Injectable()
 export class SimulatorService implements OnModuleInit {
   private readonly logger = new Logger(SimulatorService.name);
   private ships: Ship[] = [];
-  private intervalId: NodeJS.Timeout | null = null;
-  public fleetUpdate$ = new Subject<any[]>();
+
+  // Track our new recursive timeout
+  private timeoutId: NodeJS.Timeout | null = null;
+  private expectedNextTick: number = 0;
+  private shouldCalculateRoute: boolean = true;
+
+  public fleetUpdate$ = new Subject<any[]>(); // an Observable object that we would subscribe to for changes
+
+  constructor(
+    private readonly routingService: ShipRoutingService,
+    private readonly portService: PortsService,
+  ) {}
 
   async onModuleInit() {
     await this.loadShipsFromJson();
@@ -17,12 +30,15 @@ export class SimulatorService implements OnModuleInit {
 
   async loadShipsFromJson() {
     try {
-      const filePath = path.resolve(process.cwd(), 'data/fleet.json');
-      const rawData = await fs.readFile(filePath, 'utf-8'); // the raw is in string form
+      // Use the bulletproof __dirname approach
+      const filePath = join(__dirname, '..', '..', 'data', 'fleet.json');
+      const rawData = await readFile(filePath, 'utf-8');
 
-      const parsedData = JSON.parse(rawData) as object;
-      const shipConfigs = parsedData['fleet'] as ShipConfig[];
-      this.ships = shipConfigs.map((ship) => new Ship(ship));
+      // Cleanly type the JSON parse to avoid bracket notation later
+      const parsedData = JSON.parse(rawData) as { fleet: ShipConfig[] };
+
+      this.ships = parsedData.fleet.map((shipConfig) => new Ship(shipConfig));
+
       this.logger.log(
         clc.cyanBright(
           `Successfully loaded ${this.ships.length} ships from JSON config.`,
@@ -38,13 +54,39 @@ export class SimulatorService implements OnModuleInit {
   }
 
   startSimulation() {
-    if (this.intervalId) clearInterval(this.intervalId);
+    if (this.timeoutId) clearTimeout(this.timeoutId);
 
-    this.logger.log('Starting Command Center Simulator Core Loop (1 Hz)...');
+    // Calculate routes on first startup
+    if (this.shouldCalculateRoute) {
+      this.ships.forEach((ship) => {
+        const endCoords = this.portService.getPortCoordinates(
+          ship.getDestination(),
+        );
+        const currentPos = ship.getPosition();
+        const startCoords: [number, number] = [currentPos.lat, currentPos.long];
 
-    this.intervalId = setInterval(() => {
-      this.tick();
-    }, 1000); // 1 Hz rate
+        const path = this.routingService.calculatePath(startCoords, endCoords);
+        ship.setPath(path);
+      });
+
+      this.shouldCalculateRoute = false;
+    }
+
+    // Start the self-correcting game loop
+    this.expectedNextTick = Date.now() + 1000;
+    this.timeoutId = setTimeout(() => this.runGameLoop(), 1000);
+  }
+
+  private runGameLoop() {
+    const now = Date.now();
+    const drift = now - this.expectedNextTick;
+
+    this.tick();
+
+    this.expectedNextTick += 1000;
+    const nextDelay = Math.max(0, 1000 - drift);
+
+    this.timeoutId = setTimeout(() => this.runGameLoop(), nextDelay);
   }
 
   private tick() {
@@ -53,17 +95,18 @@ export class SimulatorService implements OnModuleInit {
       ship.updatePosition();
     });
 
-    //  Build the current raw snapshot data structure array
+    // Build the current raw snapshot data structure array
     const currentSnapshot = this.ships.map((ship) => ship.getData());
 
-    //  send it into pipeline
+    // next means: emit message to all subscribers
     this.fleetUpdate$.next(currentSnapshot);
   }
 
   stopSimulation() {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+    // FIX: Clear the timeoutId, not intervalId
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = null;
     }
     this.logger.log('Simulation stopped.');
   }
