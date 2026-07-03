@@ -1,105 +1,122 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import { io, Socket } from "socket.io-client";
 import { BackendShipPayload, ShipConfig, Status } from "@/types/ship";
 import { toast } from "sonner";
-
+import { DrawnPolygon } from "@/types/coordinates";
 interface FleetState {
   socket: Socket | null;
   fleetUpdates: ShipConfig[];
   isConnected: boolean;
   isConnectionFailed: boolean;
+  selectedShipId: string | null;
+  restrictedAreas: DrawnPolygon[];
   initSocket: () => void;
   startSimulator: () => void;
-  selectedShipId: string | null;
   setSelectedShipId: (id: string | null) => void;
+  addRestrictedArea: (coordinates: DrawnPolygon) => void; // Replaced any[] with DrawnPolygon
 }
 
-export const useFleetStore = create<FleetState>((set, get) => ({
-  isConnected: false,
-  fleetUpdates: [],
-  socket: null,
-  isConnectionFailed: false,
-  selectedShipId: null,
+export const useFleetStore = create<FleetState>()(
+  persist(
+    (set, get) => ({
+      isConnected: false,
+      fleetUpdates: [],
+      socket: null,
+      isConnectionFailed: false,
+      selectedShipId: null,
+      restrictedAreas: [],
 
-  setSelectedShipId: (id) => set({ selectedShipId: id }),
+      setSelectedShipId: (id) => set({ selectedShipId: id }),
 
-  initSocket: () => {
-    if (get().socket) return;
+      addRestrictedArea: (coordinates) =>
+        set((state) => ({
+          restrictedAreas: [...state.restrictedAreas, coordinates],
+        })),
 
-    const socket = io("http://localhost:4000", {
-      reconnectionAttempts: 5,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 10000,
-    });
+      initSocket: () => {
+        if (get().socket) return;
 
-    socket.on("connect", () => {
-      console.log("Socket Handshake successful");
-      set(() => ({ isConnected: true, isConnectionFailed: false }));
-    });
-
-    socket.on("disconnect", () => {
-      console.log("Socket Handshake disconnected");
-      set(() => ({ isConnected: false }));
-    });
-
-    socket.on("fleetUpdate", (newData: BackendShipPayload[]) => {
-      set((state) => {
-        const oldData = state.fleetUpdates;
-
-        const merged = newData.map((incomingShip) => {
-          const oldShip = oldData.find(
-            (old) => old.shipId === incomingShip.shipId,
-          );
-
-          // 1. NORMALIZE POSITION: {lat, long} -> [lat, lng]
-          const normalizedPosition: [number, number] = [
-            incomingShip.position.lat,
-            incomingShip.position.long,
-          ];
-
-          // 2. PRESERVE PATH
-          const preservedPath =
-            incomingShip.path !== undefined ? incomingShip.path : oldShip?.path;
-
-          // 3. NORMALIZE STATUS
-          const rawStatus = incomingShip.status ?? Status.NORMAL;
-          const normalizedStatus = rawStatus.toUpperCase() as unknown as Status;
-
-          return {
-            ...oldShip,
-            ...incomingShip,
-            position: normalizedPosition,
-            path: preservedPath,
-            status: normalizedStatus,
-          } as ShipConfig;
+        const socket = io("http://localhost:4000", {
+          reconnectionAttempts: 5,
+          reconnectionDelay: 2000,
+          reconnectionDelayMax: 10000,
         });
 
-        return { fleetUpdates: merged };
-      });
-    }); // <--- THIS WAS MISSING! Closes the fleetUpdate listener.
+        socket.on("connect", () => {
+          console.log("Socket Handshake successful");
+          set(() => ({ isConnected: true, isConnectionFailed: false }));
+        });
 
-    socket.io.on("reconnect_attempt", (attempt: number) => {
-      console.log(`Reconnection attempt #${attempt}...`);
-    });
+        socket.on("disconnect", () => {
+          console.log("Socket Handshake disconnected");
+          set(() => ({ isConnected: false }));
+        });
 
-    // Fires ONLY when reconnectionAttempts (5) is completely exhausted
-    socket.io.on("reconnect_failed", () => {
-      console.error("Max reconnection attempts reached. Giving up.");
-      set({ isConnectionFailed: true, isConnected: false });
-    });
+        socket.on("fleetUpdate", (newData: BackendShipPayload[]) => {
+          set((state) => {
+            const oldData = state.fleetUpdates;
 
-    set({ socket });
-  },
+            const merged = newData.map((incomingShip) => {
+              const oldShip = oldData.find(
+                (old) => old.shipId === incomingShip.shipId,
+              );
 
-  startSimulator: () => {
-    const { socket, isConnected } = get();
+              const normalizedPosition: [number, number] = [
+                incomingShip.position.lat,
+                incomingShip.position.long,
+              ];
 
-    if (socket && isConnected) {
-      socket.emit("startSimulator", {}, (res: ShipConfig[]) => {
-        toast.success("Server acknowledged startSimulator");
-      });
-    } else {
-      toast.error("Cannot start simulator: Socket is not connected");
-    }
-  },
-}));
+              const preservedPath =
+                incomingShip.path !== undefined
+                  ? incomingShip.path
+                  : oldShip?.path;
+
+              const rawStatus = incomingShip.status ?? Status.NORMAL;
+              const normalizedStatus =
+                rawStatus.toUpperCase() as unknown as Status;
+
+              return {
+                ...oldShip,
+                ...incomingShip,
+                position: normalizedPosition,
+                path: preservedPath,
+                status: normalizedStatus,
+              } as ShipConfig;
+            });
+
+            return { fleetUpdates: merged };
+          });
+        });
+
+        socket.io.on("reconnect_attempt", (attempt: number) => {
+          console.log(`Reconnection attempt #${attempt}...`);
+        });
+
+        socket.io.on("reconnect_failed", () => {
+          console.error("Max reconnection attempts reached. Giving up.");
+          set({ isConnectionFailed: true, isConnected: false });
+        });
+
+        set({ socket });
+      },
+
+      startSimulator: () => {
+        const { socket, isConnected } = get();
+        if (socket && isConnected) {
+          socket.emit("startSimulator", {}, () => {
+            toast.success("Server acknowledged startSimulator");
+          });
+        } else {
+          toast.error("Cannot start simulator: Socket is not connected");
+        }
+      },
+    }),
+    {
+      name: "fleet-storage",
+      partialize: (state) => ({
+        restrictedAreas: state.restrictedAreas,
+      }),
+    },
+  ),
+);

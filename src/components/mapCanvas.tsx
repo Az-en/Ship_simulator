@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect } from "react";
-import L from "leaflet";
+import * as L from "leaflet";
 import {
   MapContainer,
   TileLayer,
@@ -11,9 +11,20 @@ import {
   Tooltip,
   Marker,
   Polyline,
+  FeatureGroup,
 } from "react-leaflet";
+import { EditControl } from "react-leaflet-draw";
 import { useCoordinatesStore } from "@/stores/coordinatesStore";
-import { useFleetStore } from "@/stores/fleetStore"; // Import your fleet store
+import { useFleetStore } from "@/stores/fleetStore";
+import { DrawnPolygon } from "@/types/coordinates";
+
+import "leaflet/dist/leaflet.css";
+import "leaflet-draw/dist/leaflet.draw.css";
+
+interface DrawPolygonEvent {
+  layerType: string;
+  layer: L.Layer;
+}
 
 function MapFix() {
   const map = useMap();
@@ -28,7 +39,6 @@ function MapFix() {
   return null;
 }
 
-// A simple fallback icon for your ships (a yellow circle with a border)
 const createShipIcon = (isSelected: boolean) =>
   L.divIcon({
     className: "clear-background",
@@ -48,7 +58,7 @@ const createShipIcon = (isSelected: boolean) =>
 
 export default function MapCanvas() {
   // Navigation Environment State
-  const bb = useCoordinatesStore((state) => state.bb);
+  // const bb = useCoordinatesStore((state) => state.bb);
   const nWater = useCoordinatesStore((state) => state.navigableWater);
   const ports = useCoordinatesStore((state) => state.ports);
 
@@ -56,15 +66,47 @@ export default function MapCanvas() {
   const ships = useFleetStore((state) => state.fleetUpdates);
   const selectedShipId = useFleetStore((state) => state.selectedShipId);
   const setSelectedShipId = useFleetStore((state) => state.setSelectedShipId);
+  const socket = useFleetStore((state) => state.socket);
+  // const hasBoundingBox = bb && bb.north !== "";
+  // const bounds: [[number, number], [number, number]] | undefined =
+  //   hasBoundingBox
+  //     ? [
+  //         [parseFloat(bb.south), parseFloat(bb.west)],
+  //         [parseFloat(bb.north), parseFloat(bb.east)],
+  //       ]
+  //     : undefined;
+  const addRestrictedArea = useFleetStore((state) => state.addRestrictedArea);
+  const restrictedAreas = useFleetStore((state) => state.restrictedAreas);
+  const handleCreated = (e: DrawPolygonEvent) => {
+    const { layerType, layer } = e;
 
-  const hasBoundingBox = bb && bb.north !== "";
-  const bounds: [[number, number], [number, number]] | undefined =
-    hasBoundingBox
-      ? [
-          [parseFloat(bb.south), parseFloat(bb.west)],
-          [parseFloat(bb.north), parseFloat(bb.east)],
-        ]
-      : undefined;
+    if (layerType === "polygon") {
+      const polygonLayer = layer as L.Polygon;
+      const rawCoordinates = polygonLayer.getLatLngs();
+      socket?.emit("NewRestrictidArea", { coordinates: rawCoordinates });
+      let normalizedPolygon: DrawnPolygon;
+      if (
+        Array.isArray(rawCoordinates[0]) &&
+        Array.isArray((rawCoordinates as L.LatLng[][][])[0][0])
+      ) {
+        const multiPoly = rawCoordinates as L.LatLng[][][];
+        normalizedPolygon = multiPoly[0].map((ring) =>
+          ring.map((pt: L.LatLng) => ({ lat: pt.lat, lng: pt.lng })),
+        );
+      } else if (Array.isArray(rawCoordinates[0])) {
+        const poly = rawCoordinates as L.LatLng[][];
+        normalizedPolygon = poly.map((ring) =>
+          ring.map((pt: L.LatLng) => ({ lat: pt.lat, lng: pt.lng })),
+        );
+      } else {
+        const flatPoly = rawCoordinates as L.LatLng[];
+        normalizedPolygon = [
+          flatPoly.map((pt: L.LatLng) => ({ lat: pt.lat, lng: pt.lng })),
+        ];
+      }
+      addRestrictedArea(normalizedPolygon);
+    }
+  };
 
   return (
     <div className="h-full w-full">
@@ -80,6 +122,20 @@ export default function MapCanvas() {
           subdomains="abcd"
         />
         <MapFix />
+
+        {restrictedAreas &&
+          restrictedAreas.map((coords, index) => (
+            <Polygon
+              key={`restricted-${index}`}
+              positions={coords as L.LatLngExpression[][]} // <-- Replaced "any" with native Leaflet type
+              pathOptions={{
+                color: "#97009c",
+                fillColor: "#97009c",
+                fillOpacity: 0.2,
+                weight: 3,
+              }}
+            />
+          ))}
 
         {/* --- Map Environment Data (Water & Ports) --- */}
         {nWater && nWater.length > 0 && (
@@ -167,6 +223,32 @@ export default function MapCanvas() {
             </React.Fragment>
           );
         })}
+
+        <FeatureGroup>
+          <EditControl
+            position="topright"
+            onCreated={handleCreated}
+            draw={{
+              // Disable shapes you don't want the user to draw
+              rectangle: false,
+              circle: false,
+              circlemarker: false,
+              marker: false,
+              polyline: false,
+              // Keep polygon enabled
+              polygon: {
+                allowIntersection: false, // Prevent self-intersecting polygons
+                drawError: {
+                  color: "#e1e100", // Color when the shape is invalid
+                  message: "<strong>Error:</strong> shape edges cannot cross!",
+                },
+                shapeOptions: {
+                  color: "#97009c", // Custom color for the drawn polygon
+                },
+              },
+            }}
+          ></EditControl>
+        </FeatureGroup>
       </MapContainer>
     </div>
   );
