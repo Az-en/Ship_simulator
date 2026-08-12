@@ -16,6 +16,7 @@ import {
 import { EditControl } from "react-leaflet-draw";
 import { useCoordinatesStore } from "@/stores/coordinatesStore";
 import { useFleetStore } from "@/stores/fleetStore";
+import { useRoleStore } from "@/stores/role";
 import { DrawnPolygon } from "@/types/coordinates";
 
 import "leaflet/dist/leaflet.css";
@@ -39,7 +40,7 @@ function MapFix() {
   return null;
 }
 
-const createShipIcon = (isSelected: boolean) =>
+const createShipIcon = (isSelected: boolean, isFaded: boolean = false) =>
   L.divIcon({
     className: "clear-background",
     html: `
@@ -50,6 +51,7 @@ const createShipIcon = (isSelected: boolean) =>
         border: 3px solid ${isSelected ? "#ca8a04" : "#64748b"}; 
         border-radius: 50%;
         box-shadow: 0 0 4px rgba(0,0,0,0.5);
+        opacity: ${isFaded ? "0.3" : "1"};
       "></div>
     `,
     iconSize: [16, 16],
@@ -62,21 +64,28 @@ export default function MapCanvas() {
   const nWater = useCoordinatesStore((state) => state.navigableWater);
   const ports = useCoordinatesStore((state) => state.ports);
 
+  // Role State
+  const role = useRoleStore((state) => state.role);
+  const captainShipId = useRoleStore((state) => state.captainShipId);
+
   // Fleet State
   const ships = useFleetStore((state) => state.fleetUpdates);
   const selectedShipId = useFleetStore((state) => state.selectedShipId);
   const setSelectedShipId = useFleetStore((state) => state.setSelectedShipId);
   const socket = useFleetStore((state) => state.socket);
-  // const hasBoundingBox = bb && bb.north !== "";
-  // const bounds: [[number, number], [number, number]] | undefined =
-  //   hasBoundingBox
-  //     ? [
-  //         [parseFloat(bb.south), parseFloat(bb.west)],
-  //         [parseFloat(bb.north), parseFloat(bb.east)],
-  //       ]
-  //     : undefined;
   const addRestrictedArea = useFleetStore((state) => state.addRestrictedArea);
   const restrictedAreas = useFleetStore((state) => state.restrictedAreas);
+
+  // Synchronize selection for captain's vessel
+  useEffect(() => {
+    if (
+      role === "CAPTAIN" &&
+      captainShipId &&
+      selectedShipId !== captainShipId
+    ) {
+      setSelectedShipId(captainShipId);
+    }
+  }, [role, captainShipId, selectedShipId, setSelectedShipId]);
   const handleCreated = (e: DrawPolygonEvent) => {
     const { layerType, layer } = e;
 
@@ -192,15 +201,20 @@ export default function MapCanvas() {
         {/* --- Fleet Rendering --- */}
         {ships.map((ship) => {
           const isSelected = ship.shipId === selectedShipId;
+          const isFaded = role === "CAPTAIN" && ship.shipId !== captainShipId;
 
           return (
             <React.Fragment key={ship.shipId}>
               {/* 1. The Ship Marker */}
               <Marker
                 position={ship.position}
-                icon={createShipIcon(isSelected)}
+                icon={createShipIcon(isSelected, isFaded)}
                 eventHandlers={{
-                  click: () => setSelectedShipId(ship.shipId), // Update global selection on click
+                  click: () => {
+                    if (!isFaded) {
+                      setSelectedShipId(ship.shipId);
+                    }
+                  },
                 }}
               >
                 <Tooltip direction="top" offset={[0, -10]}>
@@ -224,31 +238,33 @@ export default function MapCanvas() {
           );
         })}
 
-        <FeatureGroup>
-          <EditControl
-            position="topright"
-            onCreated={handleCreated}
-            draw={{
-              // Disable shapes you don't want the user to draw
-              rectangle: false,
-              circle: false,
-              circlemarker: false,
-              marker: false,
-              polyline: false,
-              // Keep polygon enabled
-              polygon: {
-                allowIntersection: false, // Prevent self-intersecting polygons
-                drawError: {
-                  color: "#e1e100", // Color when the shape is invalid
-                  message: "<strong>Error:</strong> shape edges cannot cross!",
+        {role === "COMMAND" && (
+          <FeatureGroup>
+            <EditControl
+              position="topright"
+              onCreated={handleCreated}
+              draw={{
+                // Disable shapes you don't want the user to draw
+                rectangle: false,
+                circle: false,
+                circlemarker: false,
+                marker: false,
+                polyline: false,
+                // Keep polygon enabled
+                polygon: {
+                  allowIntersection: false, // Prevent self-intersecting polygons
+                  drawError: {
+                    color: "#e1e100", // Color when the shape is invalid
+                    message: "<strong>Error:</strong> shape edges cannot cross!",
+                  },
+                  shapeOptions: {
+                    color: "#97009c", // Custom color for the drawn polygon
+                  },
                 },
-                shapeOptions: {
-                  color: "#97009c", // Custom color for the drawn polygon
-                },
-              },
-            }}
-          ></EditControl>
-        </FeatureGroup>
+              }}
+            ></EditControl>
+          </FeatureGroup>
+        )}
       </MapContainer>
     </div>
   );

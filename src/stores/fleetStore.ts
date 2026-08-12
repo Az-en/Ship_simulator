@@ -8,6 +8,7 @@ interface FleetState {
   socket: Socket | null;
   fleetUpdates: ShipConfig[];
   isConnected: boolean;
+  isStarted: boolean;
   isConnectionFailed: boolean;
   selectedShipId: string | null;
   restrictedAreas: DrawnPolygon[];
@@ -21,6 +22,7 @@ export const useFleetStore = create<FleetState>()(
   persist(
     (set, get) => ({
       isConnected: false,
+      isStarted: false,
       fleetUpdates: [],
       socket: null,
       isConnectionFailed: false,
@@ -94,7 +96,7 @@ export const useFleetStore = create<FleetState>()(
         });
 
         socket.io.on("reconnect_failed", () => {
-          console.error("Max reconnection attempts reached. Giving up.");
+          toast.error("Max reconnection attempts reached. Giving up.");
           set({ isConnectionFailed: true, isConnected: false });
         });
 
@@ -107,6 +109,7 @@ export const useFleetStore = create<FleetState>()(
           socket.emit("startSimulator", {}, () => {
             toast.success("Server acknowledged startSimulator");
           });
+          set(() => ({ isStarted: true }));
         } else {
           toast.error("Cannot start simulator: Socket is not connected");
         }

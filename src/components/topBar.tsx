@@ -1,12 +1,34 @@
 "use client";
-import { useState } from "react";
 import { Anchor, Radio } from "lucide-react";
 import { useFleetStore } from "@/stores/fleetStore";
-import { Button } from "@/components/ui/button";
+import { useRoleStore } from "@/stores/role";
 export default function TopBar() {
+  const role = useRoleStore((state) => state.role);
+  const captainShipId = useRoleStore((state) => state.captainShipId);
+  const setCommand = useRoleStore((state) => state.setCommand);
+  const setCaptain = useRoleStore((state) => state.setCaptain);
+  const setCaptainShipId = useRoleStore((state) => state.setCaptainShipId);
   const isConnected = useFleetStore((state) => state.isConnected);
   const startSimulator = useFleetStore((state) => state.startSimulator);
-  const [role, setRole] = useState("command");
+
+  const REAL_SHIPS = [
+    { id: "MV-1", name: "Aurora" },
+    { id: "MV-2", name: "Borealis" },
+    { id: "MV-3", name: "Cygnus" },
+    { id: "MV-4", name: "Dragon" },
+    { id: "MV-5", name: "Emerald" },
+    { id: "MV-6", name: "Falcon" },
+    { id: "MV-7", name: "Gharial" },
+    { id: "MV-8", name: "Halcyon" },
+    { id: "MV-9", name: "Iris" },
+    { id: "MV-10", name: "Jade" },
+    { id: "MV-11", name: "Kite" },
+    { id: "MV-12", name: "Lotus" },
+    { id: "MV-13", name: "Mirage" },
+    { id: "MV-14", name: "Nova" },
+    { id: "MV-15", name: "Orca" },
+  ];
+
   return (
     <div className="h-16 w-full flex items-center justify-between bg-gray-950 border-b border-gray-800 px-6">
       {/* Left Side: Logo/Brand */}
@@ -18,18 +40,41 @@ export default function TopBar() {
       </div>
 
       <div className="flex items-center gap-6">
-        <button
-          onClick={startSimulator}
-          className="px-4 py-1.5 bg-gray-900/50 border border-gray-800 rounded-xl p-1 text-sm font-medium"
-        >
-          Start Simulator
-        </button>
+        {role === "COMMAND" ? (
+          <button
+            onClick={startSimulator}
+            className="px-4 py-1.5 bg-gray-900/50 border border-gray-800 rounded-xl p-1 text-sm font-medium hover:bg-gray-800/80 transition-colors"
+          >
+            Start Simulator
+          </button>
+        ) : (
+          <div className="flex items-center gap-2 bg-gray-900/50 border border-orange-900/60 rounded-xl px-3 py-1.5 text-sm">
+            <span className="text-orange-400 font-bold uppercase tracking-wider text-[10px] font-mono">
+              Commanding:
+            </span>
+            <select
+              value={captainShipId || ""}
+              onChange={(e) => setCaptainShipId(e.target.value)}
+              className="bg-transparent text-white font-semibold outline-none border-none cursor-pointer pr-4 text-xs focus:ring-0"
+            >
+              {REAL_SHIPS.map((ship) => (
+                <option
+                  key={ship.id}
+                  value={ship.id}
+                  className="bg-gray-950 text-white"
+                >
+                  {ship.name} ({ship.id})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="flex items-center bg-gray-900/50 border border-gray-800 rounded-xl p-1 text-sm font-medium">
           <button
-            onClick={() => setRole("command")}
+            onClick={() => setCommand()}
             className={`px-4 py-1.5 rounded-lg font-bold transition-all duration-200 ${
-              role === "command"
+              role === "COMMAND"
                 ? "bg-gray-200 text-gray-900 shadow"
                 : "text-gray-400 hover:text-white"
             }`}
@@ -38,9 +83,9 @@ export default function TopBar() {
           </button>
 
           <button
-            onClick={() => setRole("captain")}
+            onClick={() => setCaptain()}
             className={`px-4 py-1.5 rounded-lg font-bold transition-all duration-200 ${
-              role === "captain"
+              role === "CAPTAIN"
                 ? "bg-gray-200 text-gray-900 shadow"
                 : "text-gray-400 hover:text-white"
             }`}
