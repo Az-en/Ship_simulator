@@ -23,13 +23,14 @@ export class SimulatorService implements OnModuleInit {
   private timeoutId: NodeJS.Timeout | null = null;
   private expectedNextTick: number = 0;
   private shouldCalculateRoute: boolean = true;
+  private stopped: boolean = true;
 
   public fleetUpdate$ = new Subject<any[]>(); // an Observable object that we would subscribe to for changes
 
   constructor(
     private readonly routingService: ShipRoutingService,
     private readonly portService: PortsService,
-  ) {}
+  ) { }
 
   async onModuleInit() {
     await this.loadShipsFromJson();
@@ -62,30 +63,34 @@ export class SimulatorService implements OnModuleInit {
 
   startSimulation() {
     if (this.timeoutId) clearTimeout(this.timeoutId);
+    if (this.stopped) {
+      // Calculate routes on first startup
+      if (this.shouldCalculateRoute) {
+        this.ships.forEach((ship) => {
+          const endCoords = this.portService.getPortCoordinates(
+            ship.getDestination(),
+          );
 
-    // Calculate routes on first startup
-    if (this.shouldCalculateRoute) {
-      this.ships.forEach((ship) => {
-        const endCoords = this.portService.getPortCoordinates(
-          ship.getDestination(),
-        );
+          const currentPos = ship.getPosition();
 
-        const currentPos = ship.getPosition();
+          // Ensure currentPos values are treated as numbers
+          const startCoords: [number, number] = [currentPos.lat, currentPos.long];
 
-        // Ensure currentPos values are treated as numbers
-        const startCoords: [number, number] = [currentPos.lat, currentPos.long];
+          const path = this.routingService.calculatePath(startCoords, endCoords);
 
-        const path = this.routingService.calculatePath(startCoords, endCoords);
+          ship.setPath(path);
+        });
 
-        ship.setPath(path);
-      });
+        this.shouldCalculateRoute = false;
+      }
 
-      this.shouldCalculateRoute = false;
+      // Start the self-correcting game loop
+      this.expectedNextTick = Date.now() + 1000;
+      this.timeoutId = setTimeout(() => this.runGameLoop(), 1000);
     }
-
-    // Start the self-correcting game loop
-    this.expectedNextTick = Date.now() + 1000;
-    this.timeoutId = setTimeout(() => this.runGameLoop(), 1000);
+    else {
+      return { "error": "Simulation has already been started" }
+    }
   }
 
   private runGameLoop() {
@@ -132,12 +137,8 @@ export class SimulatorService implements OnModuleInit {
           : data.coordinates
       ) as Postition[];
 
-      // Inflate the drawn polygon by 200 meters!
-      // Every function after this will use the inflated boundary, giving the ship a safe berth.
       const bufferedPolygonArray = createSafetyBuffer(rawCoords, 0.2);
-
       // Convert it back into the format the rest of your app expects
-      // FIX: Added 'long: c[1]' to satisfy the strict Postition interface requirement
       const safeData: RestrictidAreaType = {
         coordinates: bufferedPolygonArray.map((c) => ({
           lat: c[0],
@@ -153,13 +154,12 @@ export class SimulatorService implements OnModuleInit {
       const invalidShips: Ship[] = []; // to store all ships with invalid paths
 
       for (const ship of this.ships) {
-        // FIX: Cast data 'as any' to bypass the local vs imported RestrictidAreaType naming collision
         const isPathValid = this.routingService.checkIfPathIsValid(
           ship,
           data as any,
         );
 
-        console.log(`Ship ${ship.getId()} path valid:`, isPathValid);
+        // console.log(`Ship ${ship.getId()} path valid:`, isPathValid);
 
         if (!isPathValid) {
           ship.setStatus(Status.REROUTING);
@@ -197,7 +197,12 @@ export class SimulatorService implements OnModuleInit {
       );
 
       ship.setPath(newPath);
-      ship.setStatus(Status.NORMAL);
+      if (newPath.length == 0) {
+        ship.setStatus(Status.STRANDED)
+      }
+      else {
+        ship.setStatus(Status.NORMAL);
+      }
     }
   }
 }

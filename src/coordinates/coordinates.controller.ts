@@ -37,4 +37,13 @@ export class CoordinatesController {
 
     return ports;
   }
+  @Get('Ships')
+  async getShips() {
+    const graphPath = join(__dirname, '..', '..', 'data', 'fleet.json');
+    const rawData = await readFile(graphPath, 'utf-8');
+    const parsed = JSON.parse(rawData) as object;
+
+    const ports = parsed['fleet'] as object;
+    return ports;
+  }
 }

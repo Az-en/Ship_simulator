@@ -33,6 +33,12 @@ export class SimulatorGateway {
     this.simulatorService.startSimulation();
     return { status: 'Started' };
   }
+  @SubscribeMessage('stopSimulator')
+  handleStopSim() {
+    this.logger.log('Stopping simulator');
+    this.simulatorService.stopSimulation();
+    return { status: "Stopped" }
+  }
   @SubscribeMessage('NewRestrictidArea')
   async handleNewArea(@MessageBody() data: RestrictidAreaType) {
     if (!data || !data.coordinates) return { error: 'No Polygon was sent' };

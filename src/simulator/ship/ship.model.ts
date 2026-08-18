@@ -4,6 +4,7 @@ export enum Status {
   DISTRESSED = 'DISTRESSED',
   STOPPED = 'STOPPED',
   ARRIVED = 'ARRIVED',
+  STRANDED = 'STRANDED'
 }
 
 export interface Postition {
@@ -105,7 +106,10 @@ export class Ship {
     if (this.#hasArrived || !this.#path || this.#path.length === 0) {
       if (!this.#hasArrived && this.#path && this.#path.length === 0) {
         // Failsafe to ensure status updates if it runs out of waypoints
-        this.#hasArrived = true;
+        this.#status = Status.STRANDED;
+        this.#speed = 0;
+      }
+      else {
         this.#status = Status.ARRIVED;
         this.#speed = 0;
       }
