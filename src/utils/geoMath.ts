@@ -51,3 +51,55 @@ export function createSafetyBuffer(
     return [coord[1], coord[0]];
   });
 }
+
+/**
+ * Calculates the great-circle distance between two lat/lng coordinates in kilometers using Turf.
+ */
+export function calculateDistanceKm(
+  coord1: LatLngInput,
+  coord2: LatLngInput,
+): number {
+  const lng1 = coord1.lng !== undefined ? coord1.lng : coord1.long;
+  const lng2 = coord2.lng !== undefined ? coord2.lng : coord2.long;
+  if (lng1 === undefined || lng2 === undefined) {
+    throw new Error('Invalid coordinates: missing longitude.');
+  }
+  const from = turf.point([lng1, coord1.lat]);
+  const to = turf.point([lng2, coord2.lat]);
+  return turf.distance(from, to, { units: 'kilometers' });
+}
+
+/**
+ * Checks if a point (lat/lng) is within a polygonal zone using Turf.
+ */
+export function isPointInZone(
+  point: LatLngInput,
+  polygonCoords: LatLngInput[],
+): boolean {
+  if (!polygonCoords || polygonCoords.length < 3) {
+    return false;
+  }
+  const ptLng = point.lng !== undefined ? point.lng : point.long;
+  if (ptLng === undefined) {
+    throw new Error('Invalid point: missing longitude.');
+  }
+  const pt = turf.point([ptLng, point.lat]);
+
+  const geoJsonCoords: number[][] = polygonCoords.map((c) => {
+    const lng = c.lng !== undefined ? c.lng : c.long;
+    if (lng === undefined) {
+      throw new Error('Invalid polygon coordinate: missing longitude.');
+    }
+    return [lng, c.lat];
+  });
+
+  const firstPoint = geoJsonCoords[0];
+  const lastPoint = geoJsonCoords[geoJsonCoords.length - 1];
+  if (firstPoint[0] !== lastPoint[0] || firstPoint[1] !== lastPoint[1]) {
+    geoJsonCoords.push([...firstPoint]);
+  }
+
+  const poly = turf.polygon([geoJsonCoords]);
+  return turf.booleanPointInPolygon(pt, poly);
+}
+

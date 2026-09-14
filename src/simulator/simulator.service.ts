@@ -1,16 +1,19 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
-import { Ship, ShipConfig } from './ship/ship.model';
+import { Ship, ShipConfig, Status, Postition } from './ship/ship.model';
 import { Subject } from 'rxjs';
 import { clc } from '@nestjs/common/utils/cli-colors.util';
-import { ShipRoutingService } from 'src/ship-routing/ship-routing.service';
-import { PortsService } from 'src/ports/ports.service';
-import { createNavigableGrid } from 'src/utils/convertPolygonToGrid';
-import { Status } from 'src/simulator/ship/ship.model';
-import { createSafetyBuffer } from 'src/utils/geoMath';
-import { Postition } from './ship/ship.model';
-interface RestrictidAreaType {
+import { ShipRoutingService } from '../ship-routing/ship-routing.service';
+import { PortsService } from '../ports/ports.service';
+import { createNavigableGrid } from '../utils/convertPolygonToGrid';
+import { createSafetyBuffer, calculateDistanceKm, isPointInZone } from '../utils/geoMath';
+import { AlertsService } from './alerts/alerts.service';
+import { RestrictedZone } from './alerts/alert.model';
+
+export class RestrictidAreaType {
+  id?: string;
+  name?: string;
   coordinates: Postition[] | Postition[][];
 }
 
@@ -18,18 +21,20 @@ interface RestrictidAreaType {
 export class SimulatorService implements OnModuleInit {
   private readonly logger = new Logger(SimulatorService.name);
   private ships: Ship[] = [];
+  private restrictedZones: RestrictedZone[] = [];
 
-  // Track our new recursive timeout
+  // Track our recursive timeout
   private timeoutId: NodeJS.Timeout | null = null;
   private expectedNextTick: number = 0;
   private shouldCalculateRoute: boolean = true;
   private stopped: boolean = true;
 
-  public fleetUpdate$ = new Subject<any[]>(); // an Observable object that we would subscribe to for changes
+  public fleetUpdate$ = new Subject<any[]>(); // Observable that subscribers listen to for fleet snapshots
 
   constructor(
     private readonly routingService: ShipRoutingService,
     private readonly portService: PortsService,
+    private readonly alertsService: AlertsService,
   ) { }
 
   async onModuleInit() {
@@ -38,13 +43,10 @@ export class SimulatorService implements OnModuleInit {
 
   async loadShipsFromJson() {
     try {
-      // Use the bulletproof __dirname approach
       const filePath = join(__dirname, '..', '..', 'data', 'fleet.json');
       const rawData = await readFile(filePath, 'utf-8');
 
-      // Cleanly type the JSON parse to avoid bracket notation later
       const parsedData = JSON.parse(rawData) as { fleet: ShipConfig[] };
-
       this.ships = parsedData.fleet.map((shipConfig) => new Ship(shipConfig));
 
       this.logger.log(
@@ -61,9 +63,26 @@ export class SimulatorService implements OnModuleInit {
     }
   }
 
+  getShips(): Ship[] {
+    return this.ships;
+  }
+
+  getRestrictedZones(): RestrictedZone[] {
+    return this.restrictedZones;
+  }
+
+  addRestrictedZone(zone: RestrictedZone) {
+    this.restrictedZones.push(zone);
+  }
+
+  clearRestrictedZones() {
+    this.restrictedZones = [];
+  }
+
   startSimulation() {
     if (this.timeoutId) clearTimeout(this.timeoutId);
     if (this.stopped) {
+      this.stopped = false;
       // Calculate routes on first startup
       if (this.shouldCalculateRoute) {
         this.ships.forEach((ship) => {
@@ -72,12 +91,8 @@ export class SimulatorService implements OnModuleInit {
           );
 
           const currentPos = ship.getPosition();
-
-          // Ensure currentPos values are treated as numbers
           const startCoords: [number, number] = [currentPos.lat, currentPos.long];
-
           const path = this.routingService.calculatePath(startCoords, endCoords);
-
           ship.setPath(path);
         });
 
@@ -87,9 +102,9 @@ export class SimulatorService implements OnModuleInit {
       // Start the self-correcting game loop
       this.expectedNextTick = Date.now() + 1000;
       this.timeoutId = setTimeout(() => this.runGameLoop(), 1000);
-    }
-    else {
-      return { "error": "Simulation has already been started" }
+      return { status: 'Started' };
+    } else {
+      return { error: 'Simulation has already been started' };
     }
   }
 
@@ -105,16 +120,66 @@ export class SimulatorService implements OnModuleInit {
     this.timeoutId = setTimeout(() => this.runGameLoop(), nextDelay);
   }
 
-  private tick() {
-    // update positions for all elements in memory
+  /**
+   * Main 1 Hz simulation tick:
+   * 1. Updates positions for all ships
+   * 2. Checks for geofence breaches (ships within restricted zones)
+   * 3. Checks for proximity warnings (ships within 2 km of each other)
+   * 4. Emits fleet update snapshot
+   */
+  public tick() {
+    // 1. Update positions for all ships
     this.ships.forEach((ship) => {
       ship.updatePosition();
     });
 
-    // Build the current raw snapshot data structure array
-    const currentSnapshot = this.ships.map((ship) => ship.getData());
+    // 2. Geofence Alerts: Check if any ship is within any restricted zone
+    for (const ship of this.ships) {
+      const shipPos = ship.getPosition();
+      for (const zone of this.restrictedZones) {
+        const isInside = isPointInZone(shipPos, zone.coordinates);
+        if (isInside) {
+          this.alertsService.dispatchGeofenceBreach(
+            ship.getId(),
+            ship.getData().name,
+            zone.id,
+            zone.name,
+          );
+        } else {
+          this.alertsService.resolveGeofenceBreach(ship.getId(), zone.id);
+        }
+      }
+    }
 
-    // next means: emit message to all subscribers
+    // 3. Proximity Warnings: Calculate distances between all unique ship pairs
+    const PROXIMITY_THRESHOLD_KM = 2.0;
+    const shipCount = this.ships.length;
+    for (let i = 0; i < shipCount; i++) {
+      for (let j = i + 1; j < shipCount; j++) {
+        const shipA = this.ships[i];
+        const shipB = this.ships[j];
+        const distKm = calculateDistanceKm(
+          shipA.getPosition(),
+          shipB.getPosition(),
+        );
+
+        if (distKm <= PROXIMITY_THRESHOLD_KM) {
+          this.alertsService.dispatchProximityWarning(
+            shipA.getId(),
+            shipB.getId(),
+            distKm,
+          );
+        } else {
+          this.alertsService.resolveProximityWarning(
+            shipA.getId(),
+            shipB.getId(),
+          );
+        }
+      }
+    }
+
+    // 4. Build and emit fleet snapshot
+    const currentSnapshot = this.ships.map((ship) => ship.getData());
     this.fleetUpdate$.next(currentSnapshot);
   }
 
@@ -123,14 +188,13 @@ export class SimulatorService implements OnModuleInit {
       clearTimeout(this.timeoutId);
       this.timeoutId = null;
     }
-
+    this.stopped = true;
     this.logger.log('Simulation stopped.');
+    return { status: 'Stopped' };
   }
 
   async handleNewArea(data: RestrictidAreaType) {
     try {
-      // 1. Calculate the new NavigableArea
-      // FIX: Explicitly cast to Postition[] so TS stops worrying about the 2D array
       const rawCoords = (
         Array.isArray(data.coordinates[0])
           ? data.coordinates[0]
@@ -138,7 +202,6 @@ export class SimulatorService implements OnModuleInit {
       ) as Postition[];
 
       const bufferedPolygonArray = createSafetyBuffer(rawCoords, 0.2);
-      // Convert it back into the format the rest of your app expects
       const safeData: RestrictidAreaType = {
         coordinates: bufferedPolygonArray.map((c) => ({
           lat: c[0],
@@ -147,19 +210,48 @@ export class SimulatorService implements OnModuleInit {
         })),
       };
 
+      // Store restricted zone
+      const zoneId =
+        data.id || `zone-${Date.now()}-${this.restrictedZones.length + 1}`;
+      const zoneName =
+        data.name ||
+        data.id ||
+        `Restricted-Zone-${this.restrictedZones.length + 1}`;
+
+      const zone: RestrictedZone = {
+        id: zoneId,
+        name: zoneName,
+        coordinates: rawCoords,
+        bufferedCoordinates: bufferedPolygonArray,
+        createdAt: new Date().toISOString(),
+      };
+      this.restrictedZones.push(zone);
+
       await createNavigableGrid(safeData.coordinates as Postition[]);
       await this.routingService.loadNavGraph();
 
-      // 2. check if any ship Path goes through that area
-      const invalidShips: Ship[] = []; // to store all ships with invalid paths
+      // Check if any ship is already inside this new zone or if path intersects it
+      const invalidShips: Ship[] = [];
 
       for (const ship of this.ships) {
+        // Immediate geofence alert if ship is already inside newly drawn zone
+        const isInside = isPointInZone(ship.getPosition(), rawCoords);
+        if (isInside) {
+          this.alertsService.dispatchGeofenceBreach(
+            ship.getId(),
+            ship.getData().name,
+            zone.id,
+            zone.name,
+          );
+          ship.setStatus(Status.REROUTING);
+          invalidShips.push(ship);
+          continue;
+        }
+
         const isPathValid = this.routingService.checkIfPathIsValid(
           ship,
           data as any,
         );
-
-        // console.log(`Ship ${ship.getId()} path valid:`, isPathValid);
 
         if (!isPathValid) {
           ship.setStatus(Status.REROUTING);
@@ -172,8 +264,11 @@ export class SimulatorService implements OnModuleInit {
           this.logger.error('Background routing failed', err.stack);
         }
       });
+
+      return { status: 'Zone added', zoneId, zoneName };
     } catch (e) {
       if (e instanceof Error) this.logger.error(e.message, e.stack);
+      throw e;
     }
   }
 
@@ -190,17 +285,16 @@ export class SimulatorService implements OnModuleInit {
         ship.getPosition().long,
       ];
 
-      // Perform the heavy pathfinding math
+      // Perform pathfinding
       const newPath = this.routingService.calculatePath(
         parsed,
         this.portService.getPortCoordinates(ship.getDestination()),
       );
 
       ship.setPath(newPath);
-      if (newPath.length == 0) {
-        ship.setStatus(Status.STRANDED)
-      }
-      else {
+      if (newPath.length === 0) {
+        ship.setStatus(Status.STRANDED);
+      } else {
         ship.setStatus(Status.NORMAL);
       }
     }

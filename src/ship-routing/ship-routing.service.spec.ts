@@ -1,168 +1,62 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import { Test, TestingModule } from '@nestjs/testing';
+import { ShipRoutingService } from './ship-routing.service';
+import { Ship, Status } from '../simulator/ship/ship.model';
 
-// Define the shape of the graph we generated earlier
-export interface GridNode {
-  lat: number;
-  lng: number;
-  neighbors: string[];
-}
+describe('ShipRoutingService', () => {
+  let service: ShipRoutingService;
 
-@Injectable()
-export class RoutingService implements OnModuleInit {
-  private readonly logger = new Logger(RoutingService.name);
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [ShipRoutingService],
+    }).compile();
 
-  // This will hold our entire graph in memory for instant lookups
-  private navGraph: Record<string, GridNode> = {};
+    service = module.get<ShipRoutingService>(ShipRoutingService);
+    await service.loadNavGraph();
+  });
 
-  async onModuleInit() {
-    await this.loadNavGraph();
-  }
+  it('should be defined', () => {
+    expect(service).toBeDefined();
+  });
 
-  // 1. Load the graph from the JSON file you just generated
-  private async loadNavGraph() {
-    try {
-      const graphPath = path.resolve(process.cwd(), 'nav-graph.json');
-      const rawData = await fs.readFile(graphPath, 'utf-8');
-      this.navGraph = JSON.parse(rawData) as Record<string, GridNode>;
+  it('should calculate a path between two coordinates', () => {
+    // Test known coordinates in navigable waters
+    const start: [number, number] = [22.80, 59.80];
+    const end: [number, number] = [22.80, 59.90];
+    const path = service.calculatePath(start, end);
+    expect(Array.isArray(path)).toBe(true);
+    expect(path.length).toBeGreaterThan(0);
+  });
 
-      const nodeCount = Object.keys(this.navGraph).length;
-      this.logger.log(
-        `A* Routing Engine loaded with ${nodeCount} navigable nodes.`,
-      );
-    } catch (error) {
-      this.logger.error(
-        'Failed to load nav-graph.json. Did you run the generator script?',
-        error,
-      );
-    }
-  }
+  it('should check if ship path intersects restricted area', () => {
+    const ship = new Ship({
+      shipId: 'MV-TEST',
+      name: 'Tester',
+      destination: 'MCT-1',
+      position: [26.55, 56.2],
+      speed: 15,
+      heading: 105,
+      fuel: 5000,
+      cargo: 'crude oil',
+      status: Status.NORMAL,
+      hasPathChanged: false,
+    });
 
-  // 2. Helper: Find the closest grid node to any arbitrary [lat, lng]
-  private getClosestNode(lat: number, lng: number): string | null {
-    let closestKey: string | null = null;
-    let shortestDistance = Infinity;
+    ship.setPath([
+      [26.55, 56.2],
+      [26.0, 56.5],
+      [25.0, 57.0],
+    ]);
 
-    for (const key in this.navGraph) {
-      const node = this.navGraph[key];
-      // Using simple Euclidean distance formula for speed (a^2 + b^2 = c^2)
-      const distance =
-        Math.pow(node.lat - lat, 2) + Math.pow(node.lng - lng, 2);
+    const intersectingZone = {
+      coordinates: [
+        { lat: 25.9, long: 56.4, lng: 56.4 },
+        { lat: 26.1, long: 56.4, lng: 56.4 },
+        { lat: 26.1, long: 56.6, lng: 56.6 },
+        { lat: 25.9, long: 56.6, lng: 56.6 },
+      ],
+    };
 
-      if (distance < shortestDistance) {
-        shortestDistance = distance;
-        closestKey = key;
-      }
-    }
-    return closestKey;
-  }
-
-  // 3. Helper: The A* Heuristic (Estimates distance from current node to end node)
-  private heuristic(nodeKey: string, targetKey: string): number {
-    const node = this.navGraph[nodeKey];
-    const target = this.navGraph[targetKey];
-    return Math.sqrt(
-      Math.pow(node.lat - target.lat, 2) + Math.pow(node.lng - target.lng, 2),
-    );
-  }
-
-  // 4. The Core A* Pathfinding Algorithm
-  public calculatePath(
-    startCoords: [number, number],
-    endCoords: [number, number],
-  ): [number, number][] {
-    // Step A: Snap exact coordinates to our grid network
-    const startKey = this.getClosestNode(startCoords[0], startCoords[1]);
-    const targetKey = this.getClosestNode(endCoords[0], endCoords[1]);
-
-    if (!startKey || !targetKey) {
-      this.logger.warn(
-        'Could not snap start or end coordinates to the navigable graph.',
-      );
-      return [];
-    }
-
-    // Step B: Set up A* Tracking Variables
-    const openSet = new Set<string>([startKey]);
-    const cameFrom = new Map<string, string>(); // Keeps track of the path
-
-    // Cost from start to a node
-    const gScore = new Map<string, number>();
-    gScore.set(startKey, 0);
-
-    // Cost from start to end, passing through a node (gScore + heuristic)
-    const fScore = new Map<string, number>();
-    fScore.set(startKey, this.heuristic(startKey, targetKey));
-
-    // Step C: The A* Loop
-    while (openSet.size > 0) {
-      // Find the node in openSet with the lowest fScore
-      const currentKey = Array.from(openSet).reduce((lowest, key) => {
-        const score = fScore.get(key) ?? Infinity;
-        const lowestScore = fScore.get(lowest) ?? Infinity;
-        return score < lowestScore ? key : lowest;
-      });
-
-      // WIN CONDITION: We reached the target!
-      if (currentKey === targetKey) {
-        return this.reconstructPath(cameFrom, currentKey);
-      }
-
-      openSet.delete(currentKey);
-      const currentNode = this.navGraph[currentKey];
-
-      // Check all valid neighbors from our pre-computed graph
-      for (const neighborKey of currentNode.neighbors) {
-        const neighbor = this.navGraph[neighborKey];
-
-        // Distance between current node and neighbor
-        const stepDistance = Math.sqrt(
-          Math.pow(currentNode.lat - neighbor.lat, 2) +
-            Math.pow(currentNode.lng - neighbor.lng, 2),
-        );
-        const tentativeGScore =
-          (gScore.get(currentKey) ?? Infinity) + stepDistance;
-
-        // If this is the shortest path to this neighbor so far, record it
-        if (tentativeGScore < (gScore.get(neighborKey) ?? Infinity)) {
-          cameFrom.set(neighborKey, currentKey);
-          gScore.set(neighborKey, tentativeGScore);
-          fScore.set(
-            neighborKey,
-            tentativeGScore + this.heuristic(neighborKey, targetKey),
-          );
-
-          if (!openSet.has(neighborKey)) {
-            openSet.add(neighborKey);
-          }
-        }
-      }
-    }
-
-    // If the loop finishes and we never hit the target, the path is blocked
-    this.logger.warn(
-      `No valid path found from [${startCoords[0]}, ${startCoords[1]}] to [${endCoords[0]}, ${endCoords[1]}]`,
-    );
-    return [];
-  }
-
-  // 5. Helper: Works backwards from the target to build the final array of waypoints
-  private reconstructPath(
-    cameFrom: Map<string, string>,
-    currentKey: string,
-  ): [number, number][] {
-    const path: [number, number][] = [
-      [this.navGraph[currentKey].lat, this.navGraph[currentKey].lng],
-    ];
-
-    while (cameFrom.has(currentKey)) {
-      currentKey = cameFrom.get(currentKey)!;
-      const node = this.navGraph[currentKey];
-      // Unshift adds it to the beginning of the array so it reads from Start -> Finish
-      path.unshift([node.lat, node.lng]);
-    }
-
-    return path;
-  }
-}
+    const isValid = service.checkIfPathIsValid(ship, intersectingZone as any);
+    expect(isValid).toBe(false);
+  });
+});
