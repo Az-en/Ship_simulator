@@ -83,4 +83,36 @@ export class SimulatorGateway {
       ? { status: 'Resolved', alert }
       : { error: 'Alert not found' };
   }
+
+  @SubscribeMessage('DirectiveStop')
+  handleDirectiveStop(@MessageBody() data: { shipId: string }) {
+    if (!data?.shipId) {
+      return { error: 'shipId is required' };
+    }
+    return this.simulatorService.handleDirectiveStop(data.shipId);
+  }
+
+  @SubscribeMessage('DirectiveNewCourse')
+  handleDirectiveNewCourse(
+    @MessageBody()
+    data: {
+      shipId: string;
+      portId?: string;
+      destination?: string;
+    },
+  ) {
+    const portId = data?.portId || data?.destination;
+    if (!data?.shipId || !portId) {
+      return { error: 'shipId and portId are required' };
+    }
+    return this.simulatorService.handleDirectiveNewCourse(data.shipId, portId);
+  }
+
+  @SubscribeMessage('DirectiveResume')
+  handleDirectiveResume(@MessageBody() data: { shipId: string }) {
+    if (!data?.shipId) {
+      return { error: 'shipId is required' };
+    }
+    return this.simulatorService.handleDirectiveResume(data.shipId);
+  }
 }

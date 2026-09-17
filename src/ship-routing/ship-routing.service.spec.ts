@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ShipRoutingService } from './ship-routing.service';
 import { Ship, Status } from '../simulator/ship/ship.model';
+import { createNavigableGrid } from '../utils/convertPolygonToGrid';
 
 describe('ShipRoutingService', () => {
   let service: ShipRoutingService;
@@ -58,5 +59,26 @@ describe('ShipRoutingService', () => {
 
     const isValid = service.checkIfPathIsValid(ship, intersectingZone as any);
     expect(isValid).toBe(false);
+  });
+
+  it('should reset to clean nav-graph from fleet.json on startup discarding prior zones', async () => {
+    // 1. Modify nav-graph with a restricted area cut out
+    const restrictedArea = [
+      { lat: 22.75, lng: 59.75 },
+      { lat: 22.85, lng: 59.75 },
+      { lat: 22.85, lng: 59.95 },
+      { lat: 22.75, lng: 59.95 },
+    ];
+    await createNavigableGrid(restrictedArea);
+    await service.loadNavGraph();
+    const restrictedNodeCount = Object.keys((service as any).navGraph).length;
+
+    // 2. Call resetToCleanNavGraph() as happens on server startup
+    await service.resetToCleanNavGraph();
+    const cleanNodeCount = Object.keys((service as any).navGraph).length;
+
+    // Clean fleet grid should restore the excluded nodes
+    expect(cleanNodeCount).toBeGreaterThan(restrictedNodeCount);
+    expect(cleanNodeCount).toBe(1819);
   });
 });

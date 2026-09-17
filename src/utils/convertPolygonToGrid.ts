@@ -35,6 +35,9 @@ export function isPointInWater(
   point: [number, number],
   polygon: number[][],
 ): boolean {
+  if (!polygon || polygon.length < 3) {
+    return false;
+  }
   const [y, x] = point; // lat is y, lng is x
   let isInside = false;
 
@@ -55,26 +58,43 @@ function coordsToKey(lat: number, lng: number): string {
   return `${lat.toFixed(2)}_${lng.toFixed(2)}`;
 }
 
-export async function createNavigableGrid(polygon: any[]) {
+export async function createNavigableGrid(polygonOrPolygons: any[] = []) {
   const fleetPath = path.resolve(process.cwd(), 'data/fleet.json');
   const rawData = await fs.readFile(fleetPath, 'utf-8');
 
   const scenarioData = JSON.parse(rawData) as ScenarioData;
   const navigableWater = scenarioData.navigableWater;
 
-  const rawCoords = Array.isArray(polygon[0]) ? polygon[0] : polygon;
+  // Normalize into a list of parsed polygons: number[][][] (each polygon is [lat, lng][])
+  const parsedPolygons: number[][][] = [];
 
-  const parsedPolygon = rawCoords.map((coor: any) => {
-    // We check for both just in case other parts of your app use 'long'
-    const lng = coor.lng !== undefined ? coor.lng : coor.long;
-    return [coor.lat, lng];
-  });
+  if (Array.isArray(polygonOrPolygons) && polygonOrPolygons.length > 0) {
+    const isMultipleZones =
+      Array.isArray(polygonOrPolygons[0]) &&
+      polygonOrPolygons[0].length > 0 &&
+      (polygonOrPolygons[0][0]?.lat !== undefined ||
+        Array.isArray(polygonOrPolygons[0][0]));
+
+    const zoneList = isMultipleZones ? polygonOrPolygons : [polygonOrPolygons];
+
+    for (const rawZone of zoneList) {
+      const coords = Array.isArray(rawZone[0]) ? rawZone[0] : rawZone;
+      if (Array.isArray(coords) && coords.length >= 3) {
+        const parsed = coords.map((coor: any) => {
+          const lng = coor.lng !== undefined ? coor.lng : coor.long;
+          return [coor.lat, lng];
+        });
+        parsedPolygons.push(parsed);
+      }
+    }
+  }
 
   const validPoints: [number, number][] = [];
   const grid: Record<string, GridNode> = {};
   const boundingBox = scenarioData.boundingBox;
 
   const validPointsSet = new Set<string>();
+  const hasRestrictedAreas = parsedPolygons.length > 0;
 
   for (
     let lat = boundingBox.south;
@@ -87,7 +107,9 @@ export async function createNavigableGrid(polygon: any[]) {
       lng += RESOLUTION
     ) {
       const isInWater = isPointInWater([lat, lng], navigableWater);
-      const isInRestrictidArea = isPointInWater([lat, lng], parsedPolygon);
+      const isInRestrictidArea = hasRestrictedAreas
+        ? parsedPolygons.some((p) => isPointInWater([lat, lng], p))
+        : false;
 
       if (isInWater && !isInRestrictidArea) {
         validPoints.push([lat, lng]);
@@ -114,7 +136,14 @@ export async function createNavigableGrid(polygon: any[]) {
   });
 
   const outputPath = path.resolve(process.cwd(), 'data/nav-graph.json');
-  await fs.writeFile(outputPath, JSON.stringify(grid, null, 2));
+  const tempPath = `${outputPath}.tmp.${process.pid}_${Date.now()}`;
+  try {
+    await fs.writeFile(tempPath, JSON.stringify(grid, null, 2));
+    await fs.rename(tempPath, outputPath);
+  } catch {
+    await fs.writeFile(outputPath, JSON.stringify(grid, null, 2));
+  }
+  return grid;
 }
 
 if (typeof require !== 'undefined' && require.main === module) {

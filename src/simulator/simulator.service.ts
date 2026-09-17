@@ -7,7 +7,11 @@ import { clc } from '@nestjs/common/utils/cli-colors.util';
 import { ShipRoutingService } from '../ship-routing/ship-routing.service';
 import { PortsService } from '../ports/ports.service';
 import { createNavigableGrid } from '../utils/convertPolygonToGrid';
-import { createSafetyBuffer, calculateDistanceKm, isPointInZone } from '../utils/geoMath';
+import {
+  createSafetyBuffer,
+  calculateDistanceKm,
+  isPointInZone,
+} from '../utils/geoMath';
 import { AlertsService } from './alerts/alerts.service';
 import { RestrictedZone } from './alerts/alert.model';
 
@@ -35,7 +39,7 @@ export class SimulatorService implements OnModuleInit {
     private readonly routingService: ShipRoutingService,
     private readonly portService: PortsService,
     private readonly alertsService: AlertsService,
-  ) { }
+  ) {}
 
   async onModuleInit() {
     await this.loadShipsFromJson();
@@ -91,8 +95,14 @@ export class SimulatorService implements OnModuleInit {
           );
 
           const currentPos = ship.getPosition();
-          const startCoords: [number, number] = [currentPos.lat, currentPos.long];
-          const path = this.routingService.calculatePath(startCoords, endCoords);
+          const startCoords: [number, number] = [
+            currentPos.lat,
+            currentPos.long,
+          ];
+          const path = this.routingService.calculatePath(
+            startCoords,
+            endCoords,
+          );
           ship.setPath(path);
         });
 
@@ -227,7 +237,13 @@ export class SimulatorService implements OnModuleInit {
       };
       this.restrictedZones.push(zone);
 
-      await createNavigableGrid(safeData.coordinates as Postition[]);
+      // Recalculate grid excluding all active restricted zones (using buffered safety margins)
+      const allActiveZonePolygons = this.restrictedZones.map((z) =>
+        z.bufferedCoordinates
+          ? z.bufferedCoordinates.map((c) => ({ lat: c[0], lng: c[1] }))
+          : z.coordinates,
+      );
+      await createNavigableGrid(allActiveZonePolygons);
       await this.routingService.loadNavGraph();
 
       // Check if any ship is already inside this new zone or if path intersects it
@@ -298,5 +314,74 @@ export class SimulatorService implements OnModuleInit {
         ship.setStatus(Status.NORMAL);
       }
     }
+  }
+
+  /**
+   * Directive: Hold Position (set status to STOPPED)
+   */
+  handleDirectiveStop(shipId: string) {
+    const ship = this.ships.find((s) => s.getId() === shipId);
+    if (!ship) {
+      return { error: `Ship with ID ${shipId} not found` };
+    }
+    ship.setStatus(Status.STOPPED);
+    this.logger.log(`[DIRECTIVE] Ship ${shipId} commanded to STOP (Hold Position)`);
+    this.fleetUpdate$.next(this.ships.map((s) => s.getData()));
+    return { status: 'Stopped', shipId };
+  }
+
+  /**
+   * Directive: Set Course (recalculate path to selected port)
+   */
+  handleDirectiveNewCourse(shipId: string, portId: string) {
+    const ship = this.ships.find((s) => s.getId() === shipId);
+    if (!ship) {
+      return { error: `Ship with ID ${shipId} not found` };
+    }
+
+    try {
+      const endCoords = this.portService.getPortCoordinates(portId);
+      const startCoords: [number, number] = [
+        ship.getPosition().lat,
+        ship.getPosition().long,
+      ];
+
+      ship.setDestination(portId);
+      ship.setStatus(Status.REROUTING);
+
+      const newPath = this.routingService.calculatePath(startCoords, endCoords);
+      ship.setPath(newPath);
+      ship.setStatus(newPath.length === 0 ? Status.STRANDED : Status.NORMAL);
+
+      this.logger.log(
+        `[DIRECTIVE] Ship ${shipId} course set to ${portId} (${newPath.length} waypoints)`,
+      );
+      this.fleetUpdate$.next(this.ships.map((s) => s.getData()));
+      return {
+        status: 'Course updated',
+        shipId,
+        destination: portId,
+        pathLength: newPath.length,
+      };
+    } catch (err: any) {
+      this.logger.error(`Failed to set course for ship ${shipId}: ${err?.message}`);
+      return { error: err?.message || 'Failed to calculate new route' };
+    }
+  }
+
+  /**
+   * Directive: Resume Course (set status back to NORMAL)
+   */
+  handleDirectiveResume(shipId: string) {
+    const ship = this.ships.find((s) => s.getId() === shipId);
+    if (!ship) {
+      return { error: `Ship with ID ${shipId} not found` };
+    }
+    ship.setStatus(Status.NORMAL);
+    this.logger.log(
+      `[DIRECTIVE] Ship ${shipId} commanded to RESUME (Status: NORMAL)`,
+    );
+    this.fleetUpdate$.next(this.ships.map((s) => s.getData()));
+    return { status: 'Normal', shipId };
   }
 }

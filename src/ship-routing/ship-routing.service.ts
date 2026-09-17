@@ -1,9 +1,9 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { Ship } from 'src/simulator/ship/ship.model';
-import { Postition } from 'src/simulator/ship/ship.model';
-import { isPointInWater } from 'src/utils/convertPolygonToGrid';
+import { Ship } from '../simulator/ship/ship.model';
+import { Postition } from '../simulator/ship/ship.model';
+import { isPointInWater, createNavigableGrid } from '../utils/convertPolygonToGrid';
 // Define the shape of the graph we generated earlier
 export interface GridNode {
   lat: number;
@@ -21,7 +21,28 @@ export class ShipRoutingService implements OnModuleInit {
   private navGraph: Record<string, GridNode> = {};
 
   async onModuleInit() {
-    await this.loadNavGraph();
+    await this.resetToCleanNavGraph();
+  }
+
+  // Recalculates fresh nav-graph from fleet.json on startup so prior runtime restricted areas do not persist
+  public async resetToCleanNavGraph() {
+    try {
+      this.logger.log(
+        'Recalculating fresh nav-graph from fleet.json on startup...',
+      );
+      const grid = await createNavigableGrid([]);
+      this.navGraph = grid;
+      const nodeCount = Object.keys(this.navGraph).length;
+      this.logger.log(
+        `A* Routing Engine loaded with ${nodeCount} navigable nodes.`,
+      );
+    } catch (error) {
+      this.logger.error(
+        'Failed to recalculate fresh nav-graph on startup, falling back to disk cache',
+        error,
+      );
+      await this.loadNavGraph();
+    }
   }
 
   // Load the graph from the JSON file you just generated

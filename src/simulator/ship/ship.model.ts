@@ -4,7 +4,7 @@ export enum Status {
   DISTRESSED = 'DISTRESSED',
   STOPPED = 'STOPPED',
   ARRIVED = 'ARRIVED',
-  STRANDED = 'STRANDED'
+  STRANDED = 'STRANDED',
 }
 
 export interface Postition {
@@ -97,19 +97,26 @@ export class Ship {
   getDestination() {
     return this.#destination;
   }
+  setDestination(destination: string) {
+    this.#destination = destination;
+  }
   getPosition() {
     return this.#position;
   }
 
   updatePosition() {
+    // 0. Guard clause: Do nothing if ship has been commanded to STOPPED
+    if (this.#status === Status.STOPPED) {
+      return;
+    }
+
     // 1. Guard clause: Do nothing if we've arrived or have no path
     if (this.#hasArrived || !this.#path || this.#path.length === 0) {
       if (!this.#hasArrived && this.#path && this.#path.length === 0) {
         // Failsafe to ensure status updates if it runs out of waypoints
         this.#status = Status.STRANDED;
         this.#speed = 0;
-      }
-      else {
+      } else {
         this.#status = Status.ARRIVED;
         this.#speed = 0;
       }
