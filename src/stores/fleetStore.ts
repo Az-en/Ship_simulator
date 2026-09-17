@@ -1,9 +1,12 @@
-import { create } from "zustand";
+﻿import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { io, Socket } from "socket.io-client";
 import { BackendShipPayload, ShipConfig, Status } from "@/types/ship";
 import { toast } from "sonner";
 import { DrawnPolygon } from "@/types/coordinates";
+import { useAlertStore } from "./alertStore";
+import { Alert } from "@/types/alert";
+
 interface FleetState {
   socket: Socket | null;
   fleetUpdates: ShipConfig[];
@@ -14,8 +17,9 @@ interface FleetState {
   restrictedAreas: DrawnPolygon[];
   initSocket: () => void;
   startSimulator: () => void;
+  stopSimulator: () => void;
   setSelectedShipId: (id: string | null) => void;
-  addRestrictedArea: (coordinates: DrawnPolygon) => void; // Replaced any[] with DrawnPolygon
+  addRestrictedArea: (coordinates: DrawnPolygon) => void;
 }
 
 export const useFleetStore = create<FleetState>()(
@@ -48,11 +52,28 @@ export const useFleetStore = create<FleetState>()(
         socket.on("connect", () => {
           console.log("Socket Handshake successful");
           set(() => ({ isConnected: true, isConnectionFailed: false }));
+
+          // Fetch active alerts on connect
+          socket.emit("getAlerts", {}, (res: { alerts?: Alert[] }) => {
+            if (res?.alerts) {
+              useAlertStore.getState().setAlerts(res.alerts);
+            }
+          });
         });
 
         socket.on("disconnect", () => {
           console.log("Socket Handshake disconnected");
           set(() => ({ isConnected: false }));
+        });
+
+        // Listen for individual alert updates
+        socket.on("alert", (incomingAlert: Alert) => {
+          useAlertStore.getState().addOrUpdateAlert(incomingAlert);
+        });
+
+        // Listen for active alerts list
+        socket.on("alerts", (incomingAlerts: Alert[]) => {
+          useAlertStore.getState().setAlerts(incomingAlerts);
         });
 
         socket.on("fleetUpdate", (newData: BackendShipPayload[]) => {
@@ -112,6 +133,17 @@ export const useFleetStore = create<FleetState>()(
           set(() => ({ isStarted: true }));
         } else {
           toast.error("Cannot start simulator: Socket is not connected");
+        }
+      },
+      stopSimulator: () => {
+        const { socket, isConnected } = get();
+        if (socket && isConnected) {
+          socket.emit("stopSimulator", {}, () => {
+            toast.success("Server acknowledged stopSimulator");
+          });
+          set(() => ({ isStarted: false }));
+        } else {
+          toast.error("Cannot stop simulator: Socket is not connected");
         }
       },
     }),

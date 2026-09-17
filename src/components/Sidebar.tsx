@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Crosshair, Anchor, MapPin } from "lucide-react";
 import FleetPanel from "@/components/fleet-panel";
@@ -51,6 +51,7 @@ export default function Sidebar() {
         </h3>
 
         <CommandControlsPanel
+          selectedShipId={selectedShipId}
           ship={selectedShip || null}
           readOnly={role === "CAPTAIN"}
         />
