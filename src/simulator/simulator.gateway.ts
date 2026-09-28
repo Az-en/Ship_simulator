@@ -1,17 +1,22 @@
 import {
+  ConnectedSocket,
   MessageBody,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Server } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import { SimulatorService, RestrictidAreaType } from './simulator.service';
 import { Logger } from '@nestjs/common';
 import { ShipRoutingService } from '../ship-routing/ship-routing.service';
 import { AlertsService } from './alerts/alerts.service';
+import { RoleService } from './roles/role.service';
 
 @WebSocketGateway({ cors: true })
-export class SimulatorGateway {
+export class SimulatorGateway
+  implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
   private readonly logger = new Logger(SimulatorGateway.name);
@@ -20,6 +25,7 @@ export class SimulatorGateway {
     private readonly simulatorService: SimulatorService,
     private readonly shipRoutingService: ShipRoutingService,
     private readonly alertsService: AlertsService,
+    private readonly roleService: RoleService,
   ) {
     // 1. Subscribe to fleet snapshot updates
     this.simulatorService.fleetUpdate$.subscribe((fleetSnapshot) => {
@@ -32,6 +38,56 @@ export class SimulatorGateway {
       this.server?.emit('alerts', this.alertsService.getActiveAlerts());
     });
   }
+
+  // ─── Role lifecycle hooks ───────────────────────────────────
+
+  handleConnection(client: Socket) {
+    this.logger.log(`Client connected: ${client.id}`);
+  }
+
+  handleDisconnect(client: Socket) {
+    this.logger.log(`Client disconnected: ${client.id}`);
+    this.roleService.releaseRole(client.id);
+    this.server?.emit('roleState', this.roleService.getRoleState());
+  }
+
+  @SubscribeMessage('getRoleState')
+  handleGetRoleState() {
+    return this.roleService.getRoleState();
+  }
+
+  @SubscribeMessage('claimRole')
+  handleClaimRole(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { role: 'COMMAND' | 'CAPTAIN'; shipId?: string },
+  ) {
+    let result: { success: boolean; error?: string };
+
+    if (data.role === 'COMMAND') {
+      result = this.roleService.claimCommand(client.id);
+    } else if (data.role === 'CAPTAIN' && data.shipId) {
+      result = this.roleService.claimCaptain(client.id, data.shipId);
+    } else {
+      result = {
+        success: false,
+        error: 'Invalid role or missing shipId for Captain',
+      };
+    }
+
+    if (result.success) {
+      this.server?.emit('roleState', this.roleService.getRoleState());
+    }
+    return result;
+  }
+
+  @SubscribeMessage('releaseRole')
+  handleReleaseRole(@ConnectedSocket() client: Socket) {
+    this.roleService.releaseRole(client.id);
+    this.server?.emit('roleState', this.roleService.getRoleState());
+    return { success: true };
+  }
+
+  // ─── Simulator controls ────────────────────────────────────
 
   @SubscribeMessage('startSimulator')
   handleStartSim() {

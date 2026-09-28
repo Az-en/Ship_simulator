@@ -3,6 +3,7 @@ import { SimulatorGateway } from './simulator.gateway';
 import { SimulatorService } from './simulator.service';
 import { ShipRoutingService } from '../ship-routing/ship-routing.service';
 import { AlertsService } from './alerts/alerts.service';
+import { RoleService } from './roles/role.service';
 import { Subject } from 'rxjs';
 
 describe('SimulatorGateway', () => {
@@ -24,6 +25,14 @@ describe('SimulatorGateway', () => {
     resolveAlert: jest.fn().mockReturnValue({ status: 'Resolved' }),
   };
 
+  const mockRoleService = {
+    getRoleState: jest.fn().mockReturnValue({ commandHolder: null, captainedShips: {} }),
+    claimCommand: jest.fn().mockReturnValue({ success: true }),
+    claimCaptain: jest.fn().mockReturnValue({ success: true }),
+    releaseRole: jest.fn(),
+    getSessionRole: jest.fn().mockReturnValue(null),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -31,6 +40,7 @@ describe('SimulatorGateway', () => {
         { provide: SimulatorService, useValue: mockSimulatorService },
         { provide: ShipRoutingService, useValue: mockRoutingService },
         { provide: AlertsService, useValue: mockAlertsService },
+        { provide: RoleService, useValue: mockRoleService },
       ],
     }).compile();
 
