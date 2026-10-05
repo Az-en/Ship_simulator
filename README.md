@@ -136,7 +136,7 @@ This platform provides an end-to-end operational environment for monitoring, rou
 ### Step 1: Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/Az-en/Ship_simulator
 cd Ship_simulator
 ```
 
